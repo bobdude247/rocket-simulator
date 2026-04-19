@@ -811,7 +811,10 @@
           { t: 5400, msg: "ICPS ignition" },
           { t: 6600, msg: "TLI complete, ICPS separation" },
           { t: Math.floor(9.8 * 86400), msg: "Orion service module separation" },
-          { t: Math.floor(9.99 * 86400), msg: "Main parachutes deployed" }
+          { t: Math.floor(9.985 * 86400), msg: "Drogue parachutes deployed" },
+          { t: Math.floor(9.99 * 86400), msg: "Main parachute 1 deployed" },
+          { t: Math.floor(9.9905 * 86400), msg: "Main parachute 2 deployed" },
+          { t: Math.floor(9.991 * 86400), msg: "Main parachute 3 deployed" }
         ];
         return {
           mode: "artemis2",
@@ -884,7 +887,8 @@
           idealDv: idealDv(c), requiredDv: missionRequiredDv(el.destination.value, c.missionProfile),
           dryMass: c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass, mass: totalInitialMass(c),
           scene: "launch", artemisScript: buildMissionScript(c),
-          trajectory: []
+          trajectory: [],
+          parachute: { drogue: false, mains: 0 }
         };
 
         sim.totalMissionSimSeconds = sim.artemisScript ? sim.artemisScript.totalSeconds : 3000;
@@ -920,6 +924,8 @@
             s.fired[ev.msg] = true;
             log(ev.msg, "ok");
             if (ev.msg.includes("SRB separation")) sim.boostersAttached = false;
+            if (ev.msg.includes("Drogue")) sim.parachute.drogue = true;
+            if (ev.msg.includes("Main parachute")) sim.parachute.mains = Math.min(3, sim.parachute.mains + 1);
           }
         });
 
@@ -1007,7 +1013,26 @@
           log(`Booster separation. Dropped ${fmt(sepMass)} kg dry mass.`, "ok");
         }
 
-        const net = thrust + drag - sim.mass * grav;
+        if (!sim.artemisScript && c.autopilot === "suborbital") {
+          if (!sim.parachute.drogue && sim.vel < -1 && sim.alt < 900) {
+            sim.parachute.drogue = true;
+            log("Drogue parachute deployed", "ok");
+          }
+          if (sim.parachute.drogue && sim.parachute.mains < 1 && sim.alt < 350) {
+            sim.parachute.mains = 1;
+            log("Main parachute deployed", "ok");
+          }
+        }
+
+        let chuteForce = 0;
+        if (sim.vel < 0 && (sim.parachute.drogue || sim.parachute.mains > 0)) {
+          const chuteCd = 1.55;
+          const area = (sim.parachute.drogue ? 1.2 : 0) + sim.parachute.mains * 10.5;
+          const v2 = sim.vel * sim.vel;
+          chuteForce = 0.5 * rho * v2 * chuteCd * area;
+        }
+
+        const net = thrust + drag + chuteForce - sim.mass * grav;
         sim.acc = net / Math.max(1, sim.mass);
         sim.vel += sim.acc * dt;
         sim.alt += sim.vel * dt;
@@ -1132,6 +1157,30 @@
         ctx.lineTo(x + bodyW / 2, y - bodyH);
         ctx.closePath();
         ctx.fill();
+
+        const chuteCount = sim.parachute ? sim.parachute.mains : 0;
+        const drogueOnly = sim.parachute && sim.parachute.drogue && chuteCount === 0;
+        if (drogueOnly || chuteCount > 0) {
+          const canopyY = y - bodyH - 24;
+          const count = chuteCount > 0 ? chuteCount : 1;
+          for (let i = 0; i < count; i++) {
+            const xOffset = (i - (count - 1) / 2) * 22;
+            const r = drogueOnly ? 8 : 13;
+            ctx.fillStyle = drogueOnly ? "#ffb35c" : "#f4f7ff";
+            ctx.beginPath();
+            ctx.arc(x + xOffset, canopyY, r, Math.PI, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = "#cfd8ef";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x + xOffset - r + 2, canopyY);
+            ctx.lineTo(x, y - bodyH + 4);
+            ctx.moveTo(x + xOffset + r - 2, canopyY);
+            ctx.lineTo(x, y - bodyH + 4);
+            ctx.stroke();
+          }
+        }
 
         const thrusting = running && !sim.missionDone && (sim.coreFuel > 0 || sim.boosterFuel > 0) && (sim.scene === "launch");
         if (thrusting) {
