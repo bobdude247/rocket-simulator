@@ -145,6 +145,75 @@
         font-size: 0.76rem;
       }
 
+      .map-tools {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+        align-items: center;
+      }
+
+      .map-path-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        justify-content: flex-start;
+        border: 1px solid #365296;
+        border-radius: 8px;
+        padding: 0.42rem 0.55rem;
+        background: #0c1733;
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+
+      .map-path-toggle input {
+        width: auto;
+        margin: 0;
+      }
+
+      .map-panel {
+        border: 1px solid #2a4279;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      #mapView,
+      #mapModalView {
+        width: 100%;
+        height: 220px;
+        display: block;
+        background: #060b1a;
+      }
+
+      .map-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 999;
+        padding: 1rem;
+      }
+
+      .map-modal.open {
+        display: flex;
+      }
+
+      .map-modal-card {
+        width: min(1100px, 95vw);
+        border: 1px solid #31519f;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #0d1733, #101d3a);
+        padding: 0.8rem;
+      }
+
+      .map-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+
       .ok { color: var(--good); }
       .warn { color: var(--warn); }
       .bad { color: var(--bad); }
@@ -295,6 +364,13 @@
             <button id="pauseBtn">Pause</button>
           </div>
           <button id="resetBtn">Reset Vehicle</button>
+          <div class="map-tools">
+            <button id="mapPopBtn">Pop Out Map</button>
+            <label class="map-path-toggle" for="showPath">
+              <input id="showPath" type="checkbox" checked />
+              Show Flight Path
+            </label>
+          </div>
           <div id="goalText" class="k"></div>
           <div id="analysisText" class="k"></div>
         </div>
@@ -311,8 +387,21 @@
             <div class="stat"><div class="k">Delta‑v (ideal)</div><div id="sDv" class="v">0 m/s</div></div>
             <div class="stat"><div class="k">Status</div><div id="sState" class="v">Idle</div></div>
           </div>
+          <div class="map-panel">
+            <canvas id="mapView" width="800" height="220"></canvas>
+          </div>
           <div id="eventLog"></div>
         </div>
+      </div>
+    </div>
+
+    <div id="mapModal" class="map-modal" aria-hidden="true">
+      <div class="map-modal-card">
+        <div class="map-modal-header">
+          <div><strong>Earth-Moon Mission Map</strong></div>
+          <button id="mapModalClose">Close Map</button>
+        </div>
+        <canvas id="mapModalView" width="1050" height="560"></canvas>
       </div>
     </div>
 
@@ -363,6 +452,12 @@
       const analysisEl = document.getElementById("analysisText");
       const canvas = document.getElementById("view");
       const ctx = canvas.getContext("2d");
+      const mapCanvas = document.getElementById("mapView");
+      const mapCtx = mapCanvas.getContext("2d");
+      const mapModal = document.getElementById("mapModal");
+      const mapModalCanvas = document.getElementById("mapModalView");
+      const mapModalCtx = mapModalCanvas.getContext("2d");
+      const showPathEl = document.getElementById("showPath");
 
       let sim;
       let running = false;
@@ -426,6 +521,137 @@
       }
 
       function isoDate(dt) { return dt.toISOString().slice(0, 10); }
+
+      function mapPosition() {
+        const earth = { x: 0.22, y: 0.52, r: 0.07 };
+        const moon = { x: 0.78, y: 0.52, r: 0.026 };
+
+        if (sim?.artemisScript) {
+          const t = sim.t;
+          const phase = sim.artemisScript.phases.find((p) => t >= p.t0 && t <= p.t1) || sim.artemisScript.phases[sim.artemisScript.phases.length - 1];
+          const u = (phase.t1 - phase.t0) > 0 ? (t - phase.t0) / (phase.t1 - phase.t0) : 1;
+
+          if (phase.scene === "launch" || phase.scene === "earthOrbit" || phase.scene === "reentry" || phase.scene === "ocean") {
+            return {
+              earth,
+              moon,
+              ship: {
+                x: earth.x + 0.09 + 0.03 * Math.cos(sim.t / 1800),
+                y: earth.y - 0.02 + 0.03 * Math.sin(sim.t / 1500)
+              }
+            };
+          }
+
+          if (phase.scene === "cislunar") {
+            return {
+              earth,
+              moon,
+              ship: { x: lerp(earth.x + 0.10, moon.x - 0.08, u), y: earth.y + 0.02 * Math.sin(u * Math.PI) }
+            };
+          }
+
+          if (phase.scene === "moonFlyby") {
+            const a = u * Math.PI * 1.35 - Math.PI * 0.2;
+            return {
+              earth,
+              moon,
+              ship: { x: moon.x + Math.cos(a) * 0.08, y: moon.y + Math.sin(a) * 0.08 }
+            };
+          }
+
+          if (phase.scene === "return") {
+            return {
+              earth,
+              moon,
+              ship: { x: lerp(moon.x - 0.08, earth.x + 0.11, u), y: earth.y - 0.03 * Math.sin(u * Math.PI) }
+            };
+          }
+        }
+
+        const d = clamp(sim?.alt || 0, 0, 450000) / 450000;
+        return {
+          earth,
+          moon,
+          ship: { x: earth.x + 0.08 + d * 0.28, y: earth.y - d * 0.06 }
+        };
+      }
+
+      function pushTrajectoryPoint() {
+        if (!sim) return;
+        const p = mapPosition();
+        const px = p.ship.x;
+        const py = p.ship.y;
+        const prev = sim.trajectory.length ? sim.trajectory[sim.trajectory.length - 1] : null;
+        if (!prev || Math.hypot(prev.x - px, prev.y - py) > 0.002) {
+          sim.trajectory.push({ x: px, y: py });
+          if (sim.trajectory.length > 6000) sim.trajectory.shift();
+        }
+      }
+
+      function drawMap(targetCanvas, targetCtx) {
+        if (!sim || !targetCanvas || !targetCtx) return;
+        const w = targetCanvas.width;
+        const h = targetCanvas.height;
+        targetCtx.clearRect(0, 0, w, h);
+        targetCtx.fillStyle = "#040913";
+        targetCtx.fillRect(0, 0, w, h);
+
+        for (let i = 0; i < 90; i++) {
+          const sx = (i * 157) % w;
+          const sy = (i * 79) % h;
+          targetCtx.fillStyle = i % 3 ? "#6f8fd8" : "#dbe6ff";
+          targetCtx.fillRect(sx, sy, 1.5, 1.5);
+        }
+
+        const p = mapPosition();
+        const ex = p.earth.x * w;
+        const ey = p.earth.y * h;
+        const er = p.earth.r * Math.min(w, h);
+        const mx = p.moon.x * w;
+        const my = p.moon.y * h;
+        const mr = p.moon.r * Math.min(w, h);
+        const sx = p.ship.x * w;
+        const sy = p.ship.y * h;
+
+        targetCtx.strokeStyle = "#355cb3";
+        targetCtx.lineWidth = 1.5;
+        targetCtx.beginPath();
+        targetCtx.moveTo(ex, ey);
+        targetCtx.lineTo(mx, my);
+        targetCtx.stroke();
+
+        targetCtx.fillStyle = "#1f5dd4";
+        targetCtx.beginPath();
+        targetCtx.arc(ex, ey, er, 0, Math.PI * 2);
+        targetCtx.fill();
+
+        targetCtx.fillStyle = "#d8dee8";
+        targetCtx.beginPath();
+        targetCtx.arc(mx, my, mr, 0, Math.PI * 2);
+        targetCtx.fill();
+
+        if (showPathEl.checked && sim.trajectory.length > 1) {
+          targetCtx.strokeStyle = "#67e2ff";
+          targetCtx.lineWidth = 2;
+          targetCtx.beginPath();
+          targetCtx.moveTo(sim.trajectory[0].x * w, sim.trajectory[0].y * h);
+          for (let i = 1; i < sim.trajectory.length; i++) {
+            targetCtx.lineTo(sim.trajectory[i].x * w, sim.trajectory[i].y * h);
+          }
+          targetCtx.stroke();
+        }
+
+        targetCtx.fillStyle = "#ffdf88";
+        targetCtx.beginPath();
+        targetCtx.arc(sx, sy, 5, 0, Math.PI * 2);
+        targetCtx.fill();
+
+        targetCtx.fillStyle = "#9ec0ff";
+        targetCtx.font = "12px monospace";
+        targetCtx.fillText("EARTH", ex - 26, ey + er + 16);
+        targetCtx.fillText("MOON", mx - 16, my + mr + 16);
+        targetCtx.fillText(`SHIP ${(sim.scene || "launch").toUpperCase()}`, 12, 18);
+      }
 
       function estimateMissionAnalysis(c, requiredDv) {
         const dryMass = c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass;
@@ -501,7 +727,8 @@
           pitchDeg: 90, missionDone: false, status: "Ready", explosion: false, landed: false,
           idealDv: idealDv(c), requiredDv: missionRequiredDv(el.destination.value, c.missionProfile),
           dryMass: c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass, mass: totalInitialMass(c),
-          scene: "launch", artemisScript: isArtemisMode(c) ? buildArtemisScript() : null
+          scene: "launch", artemisScript: isArtemisMode(c) ? buildArtemisScript() : null,
+          trajectory: []
         };
 
         sim.analysis = estimateMissionAnalysis(c, sim.requiredDv);
@@ -514,6 +741,7 @@
         else log(`Ideal Δv budget ${fmt(sim.idealDv)} m/s meets mission estimate.`, "ok");
         log(`Fuel planning: need ~${fmt(sim.analysis.requiredPropellant, 0)} kg propellant (${fmt(sim.analysis.propellantFraction * 100, 1)}% mass fraction).`, sim.analysis.requiredPropellant > (sim.coreFuel + sim.boosterFuel) ? "warn" : "ok");
         analysisEl.textContent = `Launch window (est.): ${isoDate(sim.launchWindow.open)} to ${isoDate(sim.launchWindow.close)} | cadence ~${sim.launchWindow.cadence} days.`;
+        pushTrajectoryPoint();
         updateStats();
         draw();
       }
@@ -639,6 +867,7 @@
       function stepSimulation(dt) {
         if (sim.artemisScript) stepArtemisScript(dt);
         else stepPhysicsGeneric(dt);
+        pushTrajectoryPoint();
       }
 
       function updateStats() {
@@ -761,6 +990,8 @@
         ctx.fillText(`ALT ${fmt(sim.alt, 1)} m`, 14, 22);
         ctx.fillText(`VEL ${fmt(sim.vel, 1)} m/s`, 14, 40);
         ctx.fillText(`SCENE ${(sim.scene || "launch").toUpperCase()}`, 14, 58);
+        drawMap(mapCanvas, mapCtx);
+        if (mapModal.classList.contains("open")) drawMap(mapModalCanvas, mapModalCtx);
       }
 
       function frame(ts) {
@@ -801,6 +1032,21 @@
       document.getElementById("resetBtn").addEventListener("click", () => {
         running = false;
         resetSim();
+      });
+
+      document.getElementById("mapPopBtn").addEventListener("click", () => {
+        mapModal.classList.add("open");
+        mapModal.setAttribute("aria-hidden", "false");
+        draw();
+      });
+
+      document.getElementById("mapModalClose").addEventListener("click", () => {
+        mapModal.classList.remove("open");
+        mapModal.setAttribute("aria-hidden", "true");
+      });
+
+      showPathEl.addEventListener("change", () => {
+        draw();
       });
 
       el.preset.addEventListener("change", () => { applyPreset(el.preset.value); resetSim(); });
