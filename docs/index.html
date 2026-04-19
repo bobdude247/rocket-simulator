@@ -527,6 +527,12 @@
         return Math.round(ARTEMIS_TOTAL_SECONDS / (mins * 60));
       }
 
+      function missionRateForRuntime(totalSeconds) {
+        if (realtimeMissionEl.checked) return 1;
+        const mins = clamp(Number(el.runtimeMinutes.value) || 5, 4, 10);
+        return Math.max(1, Math.round(totalSeconds / (mins * 60)));
+      }
+
       function refreshGoalText() {
         const d = DESTINATIONS[el.destination.value];
         const profile = el.missionProfile.value === "artemis2" ? "Artemis II-inspired" : "Generic";
@@ -559,6 +565,12 @@
         const earth = { x: 0.22, y: 0.52, r: 0.07 };
         const moon = { x: 0.78, y: 0.52, r: 0.026 };
 
+        const destinationKey = sim?.artemisScript?.destinationKey || el.destination.value;
+        const isMoon = destinationKey === "moon";
+        const destination = isMoon
+          ? moon
+          : { x: 0.78, y: 0.52, r: 0.03, name: (DESTINATIONS[destinationKey]?.name || destinationKey).toUpperCase() };
+
         if (sim?.artemisScript) {
           const t = sim.t;
           const phase = sim.artemisScript.phases.find((p) => t >= p.t0 && t <= p.t1) || sim.artemisScript.phases[sim.artemisScript.phases.length - 1];
@@ -569,7 +581,7 @@
             const r = earth.r + lerp(0.001, 0.055, u);
             return {
               earth,
-              moon,
+              moon: destination,
               ship: { x: earth.x + Math.cos(a) * r, y: earth.y + Math.sin(a) * r }
             };
           }
@@ -580,7 +592,7 @@
             const r = earth.r + 0.065 + 0.008 * Math.sin(u * Math.PI * 2);
             return {
               earth,
-              moon,
+              moon: destination,
               ship: { x: earth.x + Math.cos(a) * r, y: earth.y + Math.sin(a) * r }
             };
           }
@@ -590,7 +602,7 @@
             const startY = earth.y - 0.03;
             return {
               earth,
-              moon,
+              moon: destination,
               ship: {
                 x: lerp(startX, 0.53, u),
                 y: lerp(startY, earth.y - 0.11, u)
@@ -601,10 +613,10 @@
           if (phase.scene === "cislunar") {
             return {
               earth,
-              moon,
+              moon: destination,
               ship: {
-                x: lerp(0.53, moon.x - 0.11, u),
-                y: lerp(earth.y - 0.11, moon.y - 0.02, u) - 0.06 * Math.sin(u * Math.PI)
+                x: lerp(0.53, destination.x - 0.11, u),
+                y: lerp(earth.y - 0.11, destination.y - 0.02, u) - 0.06 * Math.sin(u * Math.PI)
               }
             };
           }
@@ -613,10 +625,10 @@
             const a = u * Math.PI * 1.45 - Math.PI * 0.1;
             return {
               earth,
-              moon,
+              moon: destination,
               ship: {
-                x: moon.x + Math.cos(a) * 0.1,
-                y: moon.y + Math.sin(a) * 0.08
+                x: destination.x + Math.cos(a) * 0.1,
+                y: destination.y + Math.sin(a) * 0.08
               }
             };
           }
@@ -624,9 +636,9 @@
           if (phase.scene === "return") {
             return {
               earth,
-              moon,
+              moon: destination,
               ship: {
-                x: lerp(moon.x - 0.04, earth.x + 0.12, u),
+                x: lerp(destination.x - 0.04, earth.x + 0.12, u),
                 y: earth.y + 0.11 * Math.sin(u * Math.PI * 0.95)
               }
             };
@@ -637,7 +649,7 @@
             const r = earth.r + lerp(0.06, 0.002, u);
             return {
               earth,
-              moon,
+              moon: destination,
               ship: { x: earth.x + Math.cos(a) * r, y: earth.y + Math.sin(a) * r }
             };
           }
@@ -646,7 +658,7 @@
         const d = clamp(sim?.alt || 0, 0, 450000) / 450000;
         return {
           earth,
-          moon,
+          moon: destination,
           ship: { x: earth.x + 0.08 + d * 0.28, y: earth.y - d * 0.06 }
         };
       }
@@ -705,6 +717,15 @@
         targetCtx.arc(mx, my, mr, 0, Math.PI * 2);
         targetCtx.fill();
 
+        const destinationKey = sim?.artemisScript?.destinationKey || el.destination.value;
+        if (destinationKey !== "moon") {
+          targetCtx.strokeStyle = "#6a7db8";
+          targetCtx.lineWidth = 1;
+          targetCtx.beginPath();
+          targetCtx.ellipse(mx, my, mr * 2.8, mr * 1.4, 0, 0, Math.PI * 2);
+          targetCtx.stroke();
+        }
+
         if (showPathEl.checked && sim.trajectory.length > 1) {
           targetCtx.strokeStyle = "#67e2ff";
           targetCtx.lineWidth = 2;
@@ -746,7 +767,7 @@
         targetCtx.fillStyle = "#9ec0ff";
         targetCtx.font = "12px monospace";
         targetCtx.fillText("EARTH", ex - 26, ey + er + 16);
-        targetCtx.fillText("MOON", mx - 16, my + mr + 16);
+        targetCtx.fillText(destinationKey === "moon" ? "MOON" : DESTINATIONS[destinationKey].name.toUpperCase(), mx - 28, my + mr + 16);
         targetCtx.fillText(`ORION ${(sim.scene || "launch").toUpperCase()}`, 12, 18);
       }
 
@@ -880,18 +901,23 @@
 
       function resetSim() {
         const c = readConfig();
+        const script = buildMissionScript(c);
         sim = {
           cfg: c, t: 0, dt: 0.05, alt: 0, vel: 0, acc: 0, downrange: 0,
           coreFuel: c.coreFuelMass, boosterFuel: c.boosterCount * c.boosterFuelMass, boostersAttached: c.boosterCount > 0,
           pitchDeg: 90, missionDone: false, status: "Ready", explosion: false, landed: false,
           idealDv: idealDv(c), requiredDv: missionRequiredDv(el.destination.value, c.missionProfile),
           dryMass: c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass, mass: totalInitialMass(c),
-          scene: "launch", artemisScript: buildMissionScript(c),
+          scene: "launch", artemisScript: script,
           trajectory: [],
           parachute: { drogue: false, mains: 0 }
         };
 
         sim.totalMissionSimSeconds = sim.artemisScript ? sim.artemisScript.totalSeconds : 3000;
+        if (sim.artemisScript) {
+          sim.cfg.simRate = missionRateForRuntime(sim.totalMissionSimSeconds);
+          el.simRate.value = sim.cfg.simRate;
+        }
 
         sim.analysis = estimateMissionAnalysis(c, sim.requiredDv);
         sim.launchWindow = nextWindow(el.destination.value);
@@ -900,7 +926,7 @@
         log(`Vehicle reset. Initial mass ${fmt(sim.mass)} kg.`, "ok");
         if (sim.artemisScript) {
           if (sim.cfg.realtimeMission) log("Artemis II scripted auto-flight enabled. Mission will run in actual 10-day real time.", "ok");
-          else log(`Artemis II scripted auto-flight enabled. 10-day mission compressed to ~${clamp(Number(el.runtimeMinutes.value) || 5, 1, 10)} min.`, "ok");
+          else log(`Scripted mission enabled. Runtime target ~${clamp(Number(el.runtimeMinutes.value) || 5, 4, 10)} min.`, "ok");
         }
         if (sim.idealDv < sim.requiredDv) log(`Warning: ideal Δv ${fmt(sim.idealDv)} m/s < required ${fmt(sim.requiredDv)} m/s`, "warn");
         else log(`Ideal Δv budget ${fmt(sim.idealDv)} m/s meets mission estimate.`, "ok");
@@ -1277,6 +1303,12 @@
       el.missionProfile.addEventListener("change", () => { refreshGoalText(); resetSim(); });
       el.runtimeMinutes.addEventListener("change", () => { resetSim(); });
       realtimeMissionEl.addEventListener("change", () => { resetSim(); });
+
+      el.simRate.addEventListener("input", () => {
+        if (!sim) return;
+        const next = Math.max(1, Number(el.simRate.value) || 1);
+        sim.cfg.simRate = next;
+      });
 
       ids.forEach((id) => {
         if (!["preset", "destination", "missionProfile", "runtimeMinutes", "realtimeMission"].includes(id)) {
