@@ -429,6 +429,17 @@
         neptune: { name: "Neptune flyby", requiredDv: 24500, orbitAlt: 300000, cadenceDays: 367, reference: "2030-07-01" }
       };
 
+      const TRANSFER_DAYS = {
+        moon: 4,
+        mercury: 120,
+        venus: 150,
+        mars: 210,
+        jupiter: 850,
+        saturn: 1500,
+        uranus: 3000,
+        neptune: 4500
+      };
+
       const PRESETS = {
         sls: {
           payloadMass: 26000, diameter: 8.4, coreDryMass: 95000, coreFuelMass: 1020000, coreThrust: 8.2, coreIsp: 440,
@@ -802,7 +813,66 @@
           { t: Math.floor(9.8 * 86400), msg: "Orion service module separation" },
           { t: Math.floor(9.99 * 86400), msg: "Main parachutes deployed" }
         ];
-        return { phases, events, fired: {}, currentPhase: "Launch and ascent" };
+        return {
+          mode: "artemis2",
+          destinationKey: "moon",
+          totalSeconds: ARTEMIS_TOTAL_SECONDS,
+          phases,
+          events,
+          fired: {},
+          currentPhase: "Launch and ascent"
+        };
+      }
+
+      function buildPlanetaryScript(destinationKey) {
+        const transferDays = TRANSFER_DAYS[destinationKey] || 180;
+        const outbound = transferDays * 86400;
+        const returnCruise = transferDays * 86400;
+        const startReturn = 510 + 5400 + 1800 + outbound + 28800 + 86400 + 21600;
+        const totalSeconds = startReturn + returnCruise + 3600 + 7200;
+
+        const destinationName = (DESTINATIONS[destinationKey]?.name || destinationKey).replace(" flyby", "");
+
+        const phases = [
+          { name: "Launch and ascent", t0: 0, t1: 510, alt0: 0, alt1: 185000, vel0: 0, vel1: 7800, scene: "launch" },
+          { name: "Earth parking orbit", t0: 510, t1: 5910, alt0: 185000, alt1: 190000, vel0: 7800, vel1: 7700, scene: "earthOrbit" },
+          { name: "Trans-planetary injection", t0: 5910, t1: 7710, alt0: 190000, alt1: 300000, vel0: 7700, vel1: 11200, scene: "earthOrbit" },
+          { name: `Outbound cruise to ${destinationName}`, t0: 7710, t1: 7710 + outbound, alt0: 300000, alt1: 400000000, vel0: 11200, vel1: 900, scene: "interplanetary" },
+          { name: `${destinationName} approach operations`, t0: 7710 + outbound, t1: 7710 + outbound + 28800, alt0: 400000000, alt1: 400100000, vel0: 900, vel1: 600, scene: "destinationOps" },
+          { name: "Mission operations", t0: 7710 + outbound + 28800, t1: 7710 + outbound + 115200, alt0: 400100000, alt1: 400100000, vel0: 600, vel1: 600, scene: "destinationOps" },
+          { name: "Return injection", t0: 7710 + outbound + 115200, t1: 7710 + outbound + 136800, alt0: 400100000, alt1: 399900000, vel0: 600, vel1: 11500, scene: "destinationOps" },
+          { name: "Return cruise", t0: 7710 + outbound + 136800, t1: startReturn + returnCruise, alt0: 399900000, alt1: 120000, vel0: 11500, vel1: 10800, scene: "return" },
+          { name: "Earth reentry", t0: startReturn + returnCruise, t1: startReturn + returnCruise + 3600, alt0: 120000, alt1: 0, vel0: 10800, vel1: 10, scene: "reentry" },
+          { name: "Recovery", t0: startReturn + returnCruise + 3600, t1: totalSeconds, alt0: 0, alt1: 0, vel0: 0, vel1: 0, scene: "ocean" }
+        ];
+
+        const events = [
+          { t: 126, msg: "SRB separation" },
+          { t: 510, msg: "Core stage main engine cutoff (MECO) + separation" },
+          { t: 5910, msg: "Upper stage ignition" },
+          { t: 7710, msg: "Trans-planetary injection complete" },
+          { t: 7710 + outbound, msg: `${destinationName} arrival operations begin` },
+          { t: 7710 + outbound + 136800, msg: "Return cruise initiated" },
+          { t: startReturn + returnCruise, msg: "Entry interface" },
+          { t: totalSeconds - 900, msg: "Parachutes deployed" }
+        ];
+
+        return {
+          mode: "planetary",
+          destinationKey,
+          totalSeconds,
+          phases,
+          events,
+          fired: {},
+          currentPhase: "Launch and ascent"
+        };
+      }
+
+      function buildMissionScript(c) {
+        if (c.missionProfile === "artemis2" && el.destination.value === "moon") return buildArtemisScript();
+        if (c.missionProfile === "auto" && el.destination.value === "moon" && el.preset.value === "sls") return buildArtemisScript();
+        if (el.preset.value === "sls" && el.destination.value !== "earth") return buildPlanetaryScript(el.destination.value);
+        return null;
       }
 
       function resetSim() {
@@ -813,11 +883,11 @@
           pitchDeg: 90, missionDone: false, status: "Ready", explosion: false, landed: false,
           idealDv: idealDv(c), requiredDv: missionRequiredDv(el.destination.value, c.missionProfile),
           dryMass: c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass, mass: totalInitialMass(c),
-          scene: "launch", artemisScript: isArtemisMode(c) ? buildArtemisScript() : null,
+          scene: "launch", artemisScript: buildMissionScript(c),
           trajectory: []
         };
 
-        sim.totalMissionSimSeconds = sim.artemisScript ? ARTEMIS_TOTAL_SECONDS : 3000;
+        sim.totalMissionSimSeconds = sim.artemisScript ? sim.artemisScript.totalSeconds : 3000;
 
         sim.analysis = estimateMissionAnalysis(c, sim.requiredDv);
         sim.launchWindow = nextWindow(el.destination.value);
@@ -886,15 +956,18 @@
         sim.acc = dt > 0 ? (sim.vel - (sim.prevVel || sim.vel)) / dt : 0;
         sim.prevVel = sim.vel;
 
-        if (t >= ARTEMIS_TOTAL_SECONDS) {
-          sim.t = ARTEMIS_TOTAL_SECONDS;
+        if (t >= s.totalSeconds) {
+          sim.t = s.totalSeconds;
           sim.alt = 0;
           sim.vel = 0;
           sim.scene = "ocean";
           sim.status = "Splashdown complete";
           sim.landed = true;
           sim.missionDone = true;
-          log("Artemis II sequence complete: splashdown and recovery.", "ok");
+          const doneMsg = s.mode === "artemis2"
+            ? "Artemis II sequence complete: splashdown and recovery."
+            : `Mission to ${DESTINATIONS[s.destinationKey].name} complete: Earth recovery.`;
+          log(doneMsg, "ok");
         }
       }
 
