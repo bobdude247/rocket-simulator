@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rocket Simulator</title>
+    <style>
+      body {
+        font-family: Arial, Helvetica, sans-serif;
+        margin: 2rem auto;
+        max-width: 900px;
+        line-height: 1.5;
+        padding: 0 1rem;
+      }
+      code {
+        background: #f3f4f6;
+        padding: 0.15rem 0.35rem;
+        border-radius: 4px;
+      }
+      pre {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 1rem;
+        border-radius: 8px;
+        overflow-x: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Rocket Simulator</h1>
+    <p>
+      Mission simulator with two modes: an SLS-inspired heavy vehicle and a hobby rocket profile.
+    </p>
+
+    <h2>Run Locally</h2>
+    <pre><code>python -m src.rocket_simulator.cli --vehicle sls --destination mars --time-compression 86400 --max-events 20</code></pre>
+
+    <h2>Modes</h2>
+    <ul>
+      <li><strong>sls</strong>: heavy launch + capsule + long missions</li>
+      <li><strong>hobby</strong>: small suborbital rocket with parachute recovery</li>
+    </ul>
+
+    <h2>Destinations</h2>
+    <p>earth, moon, mercury, venus, mars, jupiter, saturn, uranus, neptune</p>
+
+    <p>
+      Source code: <a href="https://github.com/bobdude247/rocket-simulator">github.com/bobdude247/rocket-simulator</a>
+    </p>
+  </body>
+</html>
