@@ -274,6 +274,13 @@
               <input id="simRate" type="number" min="1" step="1" value="30" />
             </div>
             <div>
+              <label for="runtimeMinutes">Artemis Runtime Target (min)</label>
+              <input id="runtimeMinutes" type="number" min="1" max="10" step="1" value="5" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
               <label for="autopilot">Guidance</label>
               <select id="autopilot">
                 <option value="orbit">Auto-orbit ascent</option>
@@ -310,6 +317,7 @@
     </div>
 
     <script>
+      const ARTEMIS_TOTAL_SECONDS = 10 * 86400;
       const DESTINATIONS = {
         earth: { name: "Earth LEO", requiredDv: 9400, orbitAlt: 180000, cadenceDays: 30, reference: "2026-01-01" },
         moon: { name: "Moon", requiredDv: 12800, orbitAlt: 200000, cadenceDays: 27, reference: "2026-01-10" },
@@ -324,38 +332,14 @@
 
       const PRESETS = {
         sls: {
-          payloadMass: 26000,
-          diameter: 8.4,
-          coreDryMass: 95000,
-          coreFuelMass: 1020000,
-          coreThrust: 8.2,
-          coreIsp: 440,
-          boosterCount: 2,
-          boosterDryMass: 90000,
-          boosterFuelMass: 620000,
-          boosterThrust: 16.0,
-          boosterIsp: 269,
-          dragCd: 0.28,
-          simRate: 60,
-          autopilot: "orbit",
-          missionProfile: "auto"
+          payloadMass: 26000, diameter: 8.4, coreDryMass: 95000, coreFuelMass: 1020000, coreThrust: 8.2, coreIsp: 440,
+          boosterCount: 2, boosterDryMass: 90000, boosterFuelMass: 620000, boosterThrust: 16.0, boosterIsp: 269,
+          dragCd: 0.28, simRate: 2400, autopilot: "orbit", missionProfile: "artemis2"
         },
         hobby: {
-          payloadMass: 8,
-          diameter: 0.12,
-          coreDryMass: 14,
-          coreFuelMass: 18,
-          coreThrust: 0.0018,
-          coreIsp: 210,
-          boosterCount: 0,
-          boosterDryMass: 0,
-          boosterFuelMass: 0,
-          boosterThrust: 0,
-          boosterIsp: 1,
-          dragCd: 0.5,
-          simRate: 15,
-          autopilot: "suborbital",
-          missionProfile: "generic"
+          payloadMass: 8, diameter: 0.12, coreDryMass: 14, coreFuelMass: 18, coreThrust: 0.0018, coreIsp: 210,
+          boosterCount: 0, boosterDryMass: 0, boosterFuelMass: 0, boosterThrust: 0, boosterIsp: 1,
+          dragCd: 0.5, simRate: 15, autopilot: "suborbital", missionProfile: "generic"
         }
       };
 
@@ -366,18 +350,13 @@
 
       const ids = [
         "preset", "missionProfile", "destination", "payloadMass", "diameter", "coreDryMass", "coreFuelMass", "coreThrust", "coreIsp",
-        "boosterCount", "boosterDryMass", "boosterFuelMass", "boosterThrust", "boosterIsp", "dragCd", "simRate", "autopilot"
+        "boosterCount", "boosterDryMass", "boosterFuelMass", "boosterThrust", "boosterIsp", "dragCd", "simRate", "runtimeMinutes", "autopilot"
       ];
       const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
       const stat = {
-        time: document.getElementById("sTime"),
-        alt: document.getElementById("sAlt"),
-        vel: document.getElementById("sVel"),
-        acc: document.getElementById("sAcc"),
-        mass: document.getElementById("sMass"),
-        fuel: document.getElementById("sFuel"),
-        dv: document.getElementById("sDv"),
-        state: document.getElementById("sState")
+        time: document.getElementById("sTime"), alt: document.getElementById("sAlt"), vel: document.getElementById("sVel"),
+        acc: document.getElementById("sAcc"), mass: document.getElementById("sMass"), fuel: document.getElementById("sFuel"),
+        dv: document.getElementById("sDv"), state: document.getElementById("sState")
       };
       const logEl = document.getElementById("eventLog");
       const goalEl = document.getElementById("goalText");
@@ -390,32 +369,40 @@
       let raf = null;
       let lastTs = null;
 
-      function fmt(n, d = 0) {
-        return Number(n).toLocaleString(undefined, { maximumFractionDigits: d });
-      }
+      function fmt(n, d = 0) { return Number(n).toLocaleString(undefined, { maximumFractionDigits: d }); }
+      function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+      function lerp(a, b, t) { return a + (b - a) * clamp(t, 0, 1); }
 
       function log(msg, cls = "") {
         const line = document.createElement("div");
         if (cls) line.className = cls;
-        line.textContent = `[t=${fmt(sim.t, 1)}s] ${msg}`;
+        line.textContent = `[t=${fmt(sim?.t || 0, 1)}s] ${msg}`;
         logEl.appendChild(line);
-        while (logEl.childNodes.length > 80) logEl.removeChild(logEl.firstChild);
+        while (logEl.childNodes.length > 100) logEl.removeChild(logEl.firstChild);
         logEl.scrollTop = logEl.scrollHeight;
       }
 
       function applyPreset(name) {
         const p = PRESETS[name];
         if (!p) return;
-        Object.keys(p).forEach((k) => {
-          if (el[k]) el[k].value = p[k];
-        });
+        Object.keys(p).forEach((k) => { if (el[k]) el[k].value = p[k]; });
+        if (name === "sls") el.destination.value = "moon";
         refreshGoalText();
+      }
+
+      function isArtemisMode(c) {
+        return c.missionProfile === "artemis2" && el.destination.value === "moon" && el.preset.value === "sls";
+      }
+
+      function artemisRateForRuntime() {
+        const mins = clamp(Number(el.runtimeMinutes.value) || 5, 1, 10);
+        return Math.round(ARTEMIS_TOTAL_SECONDS / (mins * 60));
       }
 
       function refreshGoalText() {
         const d = DESTINATIONS[el.destination.value];
         const profile = el.missionProfile.value === "artemis2" ? "Artemis II-inspired" : "Generic";
-        goalEl.textContent = `Mission target: ${d.name} | Profile: ${profile} | Approx required mission Δv: ${fmt(d.requiredDv)} m/s`;
+        goalEl.textContent = `Mission target: ${d.name} | Profile: ${profile} | Approx required mission Δv: ${fmt(missionRequiredDv(el.destination.value, el.missionProfile.value))} m/s`;
       }
 
       function missionRequiredDv(destinationKey, missionProfile) {
@@ -428,7 +415,6 @@
         const today = new Date();
         const reference = new Date(`${d.reference}T00:00:00Z`);
         const cadenceMs = d.cadenceDays * 86400 * 1000;
-
         let open = reference;
         if (today > reference) {
           const delta = today.getTime() - reference.getTime();
@@ -439,9 +425,7 @@
         return { open, close, cadence: d.cadenceDays };
       }
 
-      function isoDate(dt) {
-        return dt.toISOString().slice(0, 10);
-      }
+      function isoDate(dt) { return dt.toISOString().slice(0, 10); }
 
       function estimateMissionAnalysis(c, requiredDv) {
         const dryMass = c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass;
@@ -451,33 +435,25 @@
         const avgIsp = Math.max(150, thrustWeightedIsp);
         const m0 = dryMass * Math.exp(requiredDv / (avgIsp * g0));
         const requiredPropellant = Math.max(0, m0 - dryMass);
-        return {
-          dryMass,
-          avgIsp,
-          requiredPropellant,
-          propellantFraction: requiredPropellant / Math.max(1, m0)
-        };
+        return { dryMass, avgIsp, requiredPropellant, propellantFraction: requiredPropellant / Math.max(1, m0) };
       }
 
       function readConfig() {
         const cfg = {
           destination: DESTINATIONS[el.destination.value],
-          payloadMass: Number(el.payloadMass.value),
-          diameter: Number(el.diameter.value),
-          coreDryMass: Number(el.coreDryMass.value),
-          coreFuelMass: Number(el.coreFuelMass.value),
-          coreThrust: Number(el.coreThrust.value) * 1e6,
-          coreIsp: Number(el.coreIsp.value),
-          boosterCount: Math.max(0, Math.floor(Number(el.boosterCount.value))),
-          boosterDryMass: Number(el.boosterDryMass.value),
-          boosterFuelMass: Number(el.boosterFuelMass.value),
-          boosterThrust: Number(el.boosterThrust.value) * 1e6,
-          boosterIsp: Number(el.boosterIsp.value),
-          dragCd: Number(el.dragCd.value),
-          autopilot: el.autopilot.value,
-          missionProfile: el.missionProfile.value,
-          simRate: Math.max(1, Number(el.simRate.value))
+          payloadMass: Number(el.payloadMass.value), diameter: Number(el.diameter.value),
+          coreDryMass: Number(el.coreDryMass.value), coreFuelMass: Number(el.coreFuelMass.value),
+          coreThrust: Number(el.coreThrust.value) * 1e6, coreIsp: Number(el.coreIsp.value),
+          boosterCount: Math.max(0, Math.floor(Number(el.boosterCount.value))), boosterDryMass: Number(el.boosterDryMass.value),
+          boosterFuelMass: Number(el.boosterFuelMass.value), boosterThrust: Number(el.boosterThrust.value) * 1e6,
+          boosterIsp: Number(el.boosterIsp.value), dragCd: Number(el.dragCd.value), autopilot: el.autopilot.value,
+          missionProfile: el.missionProfile.value, simRate: Math.max(1, Number(el.simRate.value))
         };
+        if (isArtemisMode(cfg)) {
+          cfg.autopilot = "orbit";
+          cfg.simRate = artemisRateForRuntime();
+          el.simRate.value = cfg.simRate;
+        }
         return cfg;
       }
 
@@ -490,38 +466,42 @@
         const mAfterBoosters = m0 - c.boosterCount * c.boosterFuelMass - c.boosterCount * c.boosterDryMass;
         const mFinal = c.payloadMass + c.coreDryMass;
         let dv = 0;
-        if (c.boosterCount > 0 && c.boosterFuelMass > 0 && mAfterBoosters > 0) {
-          dv += c.boosterIsp * g0 * Math.log(m0 / (m0 - c.boosterCount * c.boosterFuelMass));
-        }
-        if (c.coreFuelMass > 0 && mFinal > 0) {
-          dv += c.coreIsp * g0 * Math.log(Math.max(mAfterBoosters, m0 - c.coreFuelMass) / mFinal);
-        }
+        if (c.boosterCount > 0 && c.boosterFuelMass > 0 && mAfterBoosters > 0) dv += c.boosterIsp * g0 * Math.log(m0 / (m0 - c.boosterCount * c.boosterFuelMass));
+        if (c.coreFuelMass > 0 && mFinal > 0) dv += c.coreIsp * g0 * Math.log(Math.max(mAfterBoosters, m0 - c.coreFuelMass) / mFinal);
         return Math.max(0, dv);
+      }
+
+      function buildArtemisScript() {
+        const phases = [
+          { name: "Launch and ascent", t0: 0, t1: 510, alt0: 0, alt1: 185000, vel0: 0, vel1: 7800, scene: "launch" },
+          { name: "Earth parking orbit", t0: 510, t1: 5400, alt0: 185000, alt1: 190000, vel0: 7800, vel1: 7700, scene: "earthOrbit" },
+          { name: "ICPS Trans-Lunar Injection", t0: 5400, t1: 6600, alt0: 190000, alt1: 250000, vel0: 7700, vel1: 10800, scene: "earthOrbit" },
+          { name: "Outbound cislunar coast", t0: 6600, t1: 4 * 86400, alt0: 250000, alt1: 384400000, vel0: 10800, vel1: 1200, scene: "cislunar" },
+          { name: "Lunar flyby", t0: 4 * 86400, t1: 5 * 86400, alt0: 384400000, alt1: 360000000, vel0: 1200, vel1: 1400, scene: "moonFlyby" },
+          { name: "Return coast", t0: 5 * 86400, t1: Math.floor(9.8 * 86400), alt0: 360000000, alt1: 120000, vel0: 1400, vel1: 10900, scene: "return" },
+          { name: "Reentry", t0: Math.floor(9.8 * 86400), t1: Math.floor(9.98 * 86400), alt0: 120000, alt1: 0, vel0: 10900, vel1: 9, scene: "reentry" },
+          { name: "Splashdown and recovery", t0: Math.floor(9.98 * 86400), t1: ARTEMIS_TOTAL_SECONDS, alt0: 0, alt1: 0, vel0: 0, vel1: 0, scene: "ocean" }
+        ];
+        const events = [
+          { t: 126, msg: "SRB separation" },
+          { t: 510, msg: "Core stage main engine cutoff (MECO) + separation" },
+          { t: 5400, msg: "ICPS ignition" },
+          { t: 6600, msg: "TLI complete, ICPS separation" },
+          { t: Math.floor(9.8 * 86400), msg: "Orion service module separation" },
+          { t: Math.floor(9.99 * 86400), msg: "Main parachutes deployed" }
+        ];
+        return { phases, events, fired: {}, currentPhase: "Launch and ascent" };
       }
 
       function resetSim() {
         const c = readConfig();
         sim = {
-          cfg: c,
-          t: 0,
-          dt: 0.05,
-          alt: 0,
-          vel: 0,
-          acc: 0,
-          downrange: 0,
-          coreFuel: c.coreFuelMass,
-          boosterFuel: c.boosterCount * c.boosterFuelMass,
-          boostersAttached: c.boosterCount > 0,
-          pitchDeg: 90,
-          stageEventDone: false,
-          missionDone: false,
-          status: "Ready",
-          explosion: false,
-          landed: false,
-          idealDv: idealDv(c),
-          requiredDv: missionRequiredDv(el.destination.value, c.missionProfile),
-          dryMass: c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass,
-          mass: totalInitialMass(c)
+          cfg: c, t: 0, dt: 0.05, alt: 0, vel: 0, acc: 0, downrange: 0,
+          coreFuel: c.coreFuelMass, boosterFuel: c.boosterCount * c.boosterFuelMass, boostersAttached: c.boosterCount > 0,
+          pitchDeg: 90, missionDone: false, status: "Ready", explosion: false, landed: false,
+          idealDv: idealDv(c), requiredDv: missionRequiredDv(el.destination.value, c.missionProfile),
+          dryMass: c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass, mass: totalInitialMass(c),
+          scene: "launch", artemisScript: isArtemisMode(c) ? buildArtemisScript() : null
         };
 
         sim.analysis = estimateMissionAnalysis(c, sim.requiredDv);
@@ -529,34 +509,78 @@
 
         logEl.textContent = "";
         log(`Vehicle reset. Initial mass ${fmt(sim.mass)} kg.`, "ok");
-        if (sim.idealDv < sim.requiredDv) {
-          log(`Warning: ideal Δv ${fmt(sim.idealDv)} m/s < required ${fmt(sim.requiredDv)} m/s`, "warn");
-        } else {
-          log(`Ideal Δv budget ${fmt(sim.idealDv)} m/s meets mission estimate.`, "ok");
-        }
-        log(
-          `Fuel planning: need ~${fmt(sim.analysis.requiredPropellant, 0)} kg propellant ` +
-          `(${fmt(sim.analysis.propellantFraction * 100, 1)}% mass fraction).`,
-          sim.analysis.requiredPropellant > (sim.coreFuel + sim.boosterFuel) ? "warn" : "ok"
-        );
-        analysisEl.textContent =
-          `Launch window (est.): ${isoDate(sim.launchWindow.open)} to ${isoDate(sim.launchWindow.close)} ` +
-          `| cadence ~${sim.launchWindow.cadence} days.`;
+        if (sim.artemisScript) log(`Artemis II scripted auto-flight enabled. 10-day mission compressed to ~${clamp(Number(el.runtimeMinutes.value) || 5, 1, 10)} min.`, "ok");
+        if (sim.idealDv < sim.requiredDv) log(`Warning: ideal Δv ${fmt(sim.idealDv)} m/s < required ${fmt(sim.requiredDv)} m/s`, "warn");
+        else log(`Ideal Δv budget ${fmt(sim.idealDv)} m/s meets mission estimate.`, "ok");
+        log(`Fuel planning: need ~${fmt(sim.analysis.requiredPropellant, 0)} kg propellant (${fmt(sim.analysis.propellantFraction * 100, 1)}% mass fraction).`, sim.analysis.requiredPropellant > (sim.coreFuel + sim.boosterFuel) ? "warn" : "ok");
+        analysisEl.textContent = `Launch window (est.): ${isoDate(sim.launchWindow.open)} to ${isoDate(sim.launchWindow.close)} | cadence ~${sim.launchWindow.cadence} days.`;
         updateStats();
         draw();
       }
 
-      function gravityAt(alt) {
-        return g0 * (earthRadius / (earthRadius + Math.max(0, alt))) ** 2;
+      function gravityAt(alt) { return g0 * (earthRadius / (earthRadius + Math.max(0, alt))) ** 2; }
+      function airDensity(alt) { return rho0 * Math.exp(-Math.max(0, alt) / scaleHeight); }
+
+      function stepArtemisScript(dt) {
+        const s = sim.artemisScript;
+        sim.t += dt;
+        const t = sim.t;
+
+        s.events.forEach((ev) => {
+          if (!s.fired[ev.msg] && t >= ev.t) {
+            s.fired[ev.msg] = true;
+            log(ev.msg, "ok");
+            if (ev.msg.includes("SRB separation")) sim.boostersAttached = false;
+          }
+        });
+
+        let phase = s.phases[s.phases.length - 1];
+        for (const p of s.phases) {
+          if (t >= p.t0 && t <= p.t1) { phase = p; break; }
+        }
+        if (s.currentPhase !== phase.name) {
+          s.currentPhase = phase.name;
+          sim.status = phase.name;
+          log(`Phase: ${phase.name}`, "ok");
+        }
+
+        const u = (phase.t1 - phase.t0) > 0 ? (t - phase.t0) / (phase.t1 - phase.t0) : 1;
+        sim.alt = Math.max(0, lerp(phase.alt0, phase.alt1, u));
+        sim.vel = lerp(phase.vel0, phase.vel1, u);
+        sim.scene = phase.scene;
+        sim.pitchDeg = phase.scene === "launch" ? lerp(90, 20, u) : 0;
+
+        const burnWindow = Math.min(6600, ARTEMIS_TOTAL_SECONDS);
+        if (t <= burnWindow) {
+          const frac = clamp(t / burnWindow, 0, 1);
+          const wet = totalInitialMass(sim.cfg);
+          sim.mass = lerp(wet, sim.dryMass, frac);
+          const fuelLeft = Math.max(0, (wet - sim.dryMass) * (1 - frac));
+          sim.coreFuel = fuelLeft * 0.55;
+          sim.boosterFuel = fuelLeft * 0.45;
+        } else {
+          sim.mass = sim.dryMass;
+          sim.coreFuel = 0;
+          sim.boosterFuel = 0;
+        }
+
+        sim.acc = dt > 0 ? (sim.vel - (sim.prevVel || sim.vel)) / dt : 0;
+        sim.prevVel = sim.vel;
+
+        if (t >= ARTEMIS_TOTAL_SECONDS) {
+          sim.t = ARTEMIS_TOTAL_SECONDS;
+          sim.alt = 0;
+          sim.vel = 0;
+          sim.scene = "ocean";
+          sim.status = "Splashdown complete";
+          sim.landed = true;
+          sim.missionDone = true;
+          log("Artemis II sequence complete: splashdown and recovery.", "ok");
+        }
       }
 
-      function airDensity(alt) {
-        return rho0 * Math.exp(-Math.max(0, alt) / scaleHeight);
-      }
-
-      function stepPhysics(dt) {
+      function stepPhysicsGeneric(dt) {
         const c = sim.cfg;
-
         const grav = gravityAt(sim.alt);
         const rho = airDensity(sim.alt);
         const area = Math.PI * (c.diameter / 2) ** 2;
@@ -564,94 +588,57 @@
         const drag = sim.vel >= 0 ? -dragMag : dragMag;
 
         let thrust = 0;
-        let mdot = 0;
-
-        const pitchBefore = sim.pitchDeg;
         if (c.autopilot === "orbit") {
           if (sim.alt > 12000) sim.pitchDeg = Math.max(20, 90 - (sim.alt - 12000) / 3000);
           if (sim.alt > 70000) sim.pitchDeg = Math.max(5, 20 - (sim.alt - 70000) / 7000);
-        } else {
-          sim.pitchDeg = 90;
-        }
-        if (Math.abs(sim.pitchDeg - pitchBefore) > 1) {
-          // no-op, keeps deterministic updates while letting visualization track guidance
-        }
+        } else sim.pitchDeg = 90;
 
-        const thrustAllowed = !sim.missionDone && !sim.explosion;
-
-        if (thrustAllowed && sim.boostersAttached && sim.boosterFuel > 0 && c.boosterCount > 0) {
+        if (sim.boostersAttached && sim.boosterFuel > 0 && c.boosterCount > 0) {
           const boosterThrust = c.boosterCount * c.boosterThrust;
           const boosterMdot = boosterThrust / (c.boosterIsp * g0);
           thrust += boosterThrust;
-          mdot += boosterMdot;
           const burn = Math.min(sim.boosterFuel, boosterMdot * dt);
           sim.boosterFuel -= burn;
           sim.mass -= burn;
         }
-
-        if (thrustAllowed && sim.coreFuel > 0) {
+        if (sim.coreFuel > 0) {
           const coreMdot = c.coreThrust / (c.coreIsp * g0);
           thrust += c.coreThrust;
-          mdot += coreMdot;
           const burn = Math.min(sim.coreFuel, coreMdot * dt);
           sim.coreFuel -= burn;
           sim.mass -= burn;
         }
-
         if (sim.boostersAttached && sim.boosterFuel <= 0 && c.boosterCount > 0) {
           sim.boostersAttached = false;
           const sepMass = c.boosterCount * c.boosterDryMass;
           sim.mass -= sepMass;
-          if (!sim.stageEventDone) {
-            log(`Booster separation. Dropped ${fmt(sepMass)} kg dry mass.`, "ok");
-            sim.stageEventDone = true;
-          }
+          log(`Booster separation. Dropped ${fmt(sepMass)} kg dry mass.`, "ok");
         }
 
         const net = thrust + drag - sim.mass * grav;
         sim.acc = net / Math.max(1, sim.mass);
         sim.vel += sim.acc * dt;
         sim.alt += sim.vel * dt;
-        sim.downrange += Math.max(0, sim.vel * Math.cos((sim.pitchDeg * Math.PI) / 180)) * dt;
         sim.t += dt;
+        sim.scene = sim.alt > 90000 ? "earthOrbit" : "launch";
 
         if (sim.alt < 0) {
           sim.alt = 0;
-          if (sim.vel < -22) {
-            sim.explosion = true;
-            sim.status = "Vehicle lost";
-            sim.missionDone = true;
-            log(`Impact at ${fmt(Math.abs(sim.vel), 1)} m/s. Vehicle destroyed.`, "bad");
-          } else {
-            sim.landed = true;
-            sim.status = "Recovered";
-            sim.missionDone = true;
-            log(`Landing/splashdown at ${fmt(Math.abs(sim.vel), 1)} m/s.`, "ok");
-          }
+          sim.missionDone = true;
+          sim.status = sim.vel < -22 ? "Vehicle lost" : "Recovered";
+          log(sim.vel < -22 ? `Impact at ${fmt(Math.abs(sim.vel), 1)} m/s.` : `Landing/splashdown at ${fmt(Math.abs(sim.vel), 1)} m/s.`, sim.vel < -22 ? "bad" : "ok");
           sim.vel = 0;
         }
-
-        const vOrbit = Math.sqrt(3.986004418e14 / (earthRadius + Math.max(1, sim.alt)));
-        const targetAlt = c.destination.orbitAlt;
-        if (!sim.missionDone && c.autopilot === "orbit" && sim.alt >= targetAlt && sim.vel >= vOrbit * 0.92) {
-          sim.status = "Orbit achieved";
-          sim.missionDone = true;
-          log(`Orbit achieved near ${fmt(sim.alt)} m at ${fmt(sim.vel)} m/s.`, "ok");
-        }
-
-        if (!sim.missionDone && c.autopilot === "suborbital" && sim.alt > 1500 && sim.vel < -1 && sim.alt < 1200) {
-          sim.status = "Suborbital descent";
-        }
-
-        if (!sim.missionDone && sim.coreFuel <= 0 && sim.boosterFuel <= 0 && sim.alt > 0 && sim.vel < 0) {
-          sim.status = "Ballistic return";
-        }
-
         if (!sim.missionDone && sim.t > 3000) {
           sim.status = "Mission timeout";
           sim.missionDone = true;
           log("Mission timed out.", "warn");
         }
+      }
+
+      function stepSimulation(dt) {
+        if (sim.artemisScript) stepArtemisScript(dt);
+        else stepPhysicsGeneric(dt);
       }
 
       function updateStats() {
@@ -664,82 +651,116 @@
         stat.fuel.textContent = `${fmt(totalFuel, 1)} kg`;
         stat.dv.textContent = `${fmt(sim.idealDv, 0)} m/s`;
         stat.state.textContent = sim.status;
-        stat.state.className = "v " + (sim.explosion ? "bad" : sim.missionDone ? "ok" : "");
+        stat.state.className = "v " + (sim.status.includes("lost") ? "bad" : sim.missionDone ? "ok" : "");
+      }
+
+      function drawSceneBackground(w, h) {
+        const scene = sim.scene || "launch";
+        const ocean = scene === "ocean" || scene === "reentry";
+        const atmosphere = scene === "launch" || scene === "reentry";
+
+        if (atmosphere) {
+          const g = ctx.createLinearGradient(0, 0, 0, h);
+          g.addColorStop(0, "#0b2254");
+          g.addColorStop(1, ocean ? "#1a355f" : "#15263f");
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, w, h);
+        } else {
+          ctx.fillStyle = "#070b18";
+          ctx.fillRect(0, 0, w, h);
+          for (let i = 0; i < 60; i++) {
+            const sx = (i * 113) % w;
+            const sy = (i * 67) % (h - 40);
+            ctx.fillStyle = i % 3 ? "#89a8ff" : "#dce6ff";
+            ctx.fillRect(sx, sy, 1.5, 1.5);
+          }
+        }
+
+        if (scene === "earthOrbit" || scene === "return") {
+          ctx.fillStyle = "#2a5ac9";
+          ctx.beginPath();
+          ctx.arc(w + 120, h + 120, 260, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        if (scene === "cislunar" || scene === "moonFlyby") {
+          ctx.fillStyle = "#dbdfec";
+          ctx.beginPath();
+          ctx.arc(w * 0.75, h * 0.3, scene === "moonFlyby" ? 70 : 35, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        if (ocean) {
+          ctx.fillStyle = "#12416f";
+          ctx.fillRect(0, h - 70, w, 70);
+        } else if (scene === "launch") {
+          ctx.fillStyle = "#1f3a22";
+          ctx.fillRect(0, h - 45, w, 45);
+        }
+      }
+
+      function drawVehicle(w, h) {
+        const groundY = h - (sim.scene === "ocean" ? 70 : 45);
+        const altViewMax = Math.max(600, sim.alt * 1.2 + 300);
+        const pxPerM = (groundY - 25) / altViewMax;
+        const x = w * 0.2;
+        const y = groundY - sim.alt * pxPerM;
+        const bodyW = Math.max(8, sim.cfg.diameter * 2.6);
+        const bodyH = Math.max(40, 90 + Math.log10(Math.max(10, sim.mass)) * 8);
+
+        if (sim.scene === "ocean") {
+          ctx.fillStyle = "#f2f6ff";
+          ctx.beginPath();
+          ctx.ellipse(x, h - 72, 10, 8, 0, 0, Math.PI * 2);
+          ctx.fill();
+          return;
+        }
+
+        if (sim.scene === "launch") {
+          ctx.fillStyle = "#3d4e6d";
+          ctx.fillRect(x - 30, groundY - 90, 8, 90);
+        }
+
+        if (sim.boostersAttached && sim.cfg.boosterCount > 0) {
+          const bw = Math.max(4, bodyW * 0.35);
+          const bh = bodyH * 0.9;
+          ctx.fillStyle = "#d9dee9";
+          ctx.fillRect(x - bodyW * 0.8, y - bh, bw, bh);
+          ctx.fillRect(x + bodyW * 0.45, y - bh, bw, bh);
+        }
+
+        ctx.fillStyle = "#e8ecf9";
+        ctx.fillRect(x - bodyW / 2, y - bodyH, bodyW, bodyH);
+        ctx.fillStyle = "#b8c7ef";
+        ctx.beginPath();
+        ctx.moveTo(x - bodyW / 2, y - bodyH);
+        ctx.lineTo(x, y - bodyH - bodyW * 0.8);
+        ctx.lineTo(x + bodyW / 2, y - bodyH);
+        ctx.closePath();
+        ctx.fill();
+
+        const thrusting = running && !sim.missionDone && (sim.coreFuel > 0 || sim.boosterFuel > 0) && (sim.scene === "launch");
+        if (thrusting) {
+          const plumeH = 20 + Math.random() * 20;
+          ctx.fillStyle = "#ffb35c";
+          ctx.beginPath();
+          ctx.moveTo(x - bodyW * 0.25, y);
+          ctx.lineTo(x + bodyW * 0.25, y);
+          ctx.lineTo(x, y + plumeH);
+          ctx.closePath();
+          ctx.fill();
+        }
       }
 
       function draw() {
         const w = canvas.width;
         const h = canvas.height;
         ctx.clearRect(0, 0, w, h);
-
-        // background stars
-        for (let i = 0; i < 35; i++) {
-          const sx = (i * 173) % w;
-          const sy = ((i * 97) % h) * 0.7;
-          ctx.fillStyle = i % 3 === 0 ? "#d6e0ff" : "#8ea8f0";
-          ctx.fillRect(sx, sy, 1.5, 1.5);
-        }
-
-        // ground
-        const groundY = h - 45;
-        ctx.fillStyle = "#1f3a22";
-        ctx.fillRect(0, groundY, w, h - groundY);
-        ctx.fillStyle = "#285731";
-        ctx.fillRect(0, groundY + 8, w, h - groundY);
-
-        // dynamic camera scaling
-        const altViewMax = Math.max(600, sim.alt * 1.15 + 200);
-        const pxPerM = (groundY - 25) / altViewMax;
-        const rocketBaseX = w * 0.2;
-        const y = groundY - sim.alt * pxPerM;
-
-        // launch tower
-        ctx.fillStyle = "#3d4e6d";
-        ctx.fillRect(rocketBaseX - 30, groundY - 90, 8, 90);
-
-        // rocket geometry scales with diameter
-        const bodyW = Math.max(8, sim.cfg.diameter * 2.6);
-        const bodyH = Math.max(40, 90 + Math.log10(Math.max(10, sim.mass)) * 8);
-
-        // boosters
-        if (sim.boostersAttached && sim.cfg.boosterCount > 0) {
-          const bw = Math.max(4, bodyW * 0.35);
-          const bh = bodyH * 0.9;
-          ctx.fillStyle = "#d9dee9";
-          ctx.fillRect(rocketBaseX - bodyW * 0.8, y - bh, bw, bh);
-          ctx.fillRect(rocketBaseX + bodyW * 0.45, y - bh, bw, bh);
-        }
-
-        // main body
-        ctx.fillStyle = "#e8ecf9";
-        ctx.fillRect(rocketBaseX - bodyW / 2, y - bodyH, bodyW, bodyH);
-        ctx.fillStyle = "#b8c7ef";
-        ctx.beginPath();
-        ctx.moveTo(rocketBaseX - bodyW / 2, y - bodyH);
-        ctx.lineTo(rocketBaseX, y - bodyH - bodyW * 0.8);
-        ctx.lineTo(rocketBaseX + bodyW / 2, y - bodyH);
-        ctx.closePath();
-        ctx.fill();
-
-        // plume
-        const producingThrust = (sim.coreFuel > 0) || (sim.boostersAttached && sim.boosterFuel > 0);
-        if (running && producingThrust && !sim.missionDone) {
-          const plumeH = 20 + Math.random() * 18;
-          ctx.fillStyle = "#ffb35c";
-          ctx.beginPath();
-          ctx.moveTo(rocketBaseX - bodyW * 0.25, y);
-          ctx.lineTo(rocketBaseX + bodyW * 0.25, y);
-          ctx.lineTo(rocketBaseX, y + plumeH);
-          ctx.closePath();
-          ctx.fill();
-        }
-
-        // telemetry overlay
+        drawSceneBackground(w, h);
+        drawVehicle(w, h);
         ctx.fillStyle = "#9ec0ff";
         ctx.font = "13px monospace";
         ctx.fillText(`ALT ${fmt(sim.alt, 1)} m`, 14, 22);
         ctx.fillText(`VEL ${fmt(sim.vel, 1)} m/s`, 14, 40);
-        ctx.fillText(`PITCH ${fmt(sim.pitchDeg, 1)} deg`, 14, 58);
+        ctx.fillText(`SCENE ${(sim.scene || "launch").toUpperCase()}`, 14, 58);
       }
 
       function frame(ts) {
@@ -752,12 +773,9 @@
         let simAdvance = realDt * sim.cfg.simRate;
         while (simAdvance > 0) {
           const d = Math.min(subStep, simAdvance);
-          stepPhysics(d);
+          stepSimulation(d);
           simAdvance -= d;
-          if (sim.missionDone) {
-            running = false;
-            break;
-          }
+          if (sim.missionDone) { running = false; break; }
         }
 
         updateStats();
@@ -767,13 +785,11 @@
 
       document.getElementById("startBtn").addEventListener("click", () => {
         if (!sim) resetSim();
+        if (sim.missionDone) resetSim();
         running = true;
-        sim.status = sim.missionDone ? "Done" : "Running";
+        sim.status = sim.artemisScript ? "Artemis auto-flight running" : "Running";
         updateStats();
-        if (!raf) {
-          lastTs = null;
-          raf = requestAnimationFrame(frame);
-        }
+        if (!raf) { lastTs = null; raf = requestAnimationFrame(frame); }
       });
 
       document.getElementById("pauseBtn").addEventListener("click", () => {
@@ -787,23 +803,13 @@
         resetSim();
       });
 
-      el.preset.addEventListener("change", () => {
-        applyPreset(el.preset.value);
-        resetSim();
-      });
-
-      el.destination.addEventListener("change", () => {
-        refreshGoalText();
-        resetSim();
-      });
-
-      el.missionProfile.addEventListener("change", () => {
-        refreshGoalText();
-        resetSim();
-      });
+      el.preset.addEventListener("change", () => { applyPreset(el.preset.value); resetSim(); });
+      el.destination.addEventListener("change", () => { refreshGoalText(); resetSim(); });
+      el.missionProfile.addEventListener("change", () => { refreshGoalText(); resetSim(); });
+      el.runtimeMinutes.addEventListener("change", () => { resetSim(); });
 
       ids.forEach((id) => {
-        if (id !== "preset" && id !== "destination" && id !== "missionProfile") {
+        if (!["preset", "destination", "missionProfile", "runtimeMinutes"].includes(id)) {
           el[id].addEventListener("change", () => {
             if (id === "simRate") return;
             resetSim();
