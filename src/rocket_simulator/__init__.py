@@ -1,0 +1,2 @@
+"""Rocket mission simulator package."""
+
