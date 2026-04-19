@@ -350,6 +350,14 @@
           </div>
 
           <div class="row">
+            <label class="map-path-toggle" for="realtimeMission">
+              <input id="realtimeMission" type="checkbox" />
+              Use Actual 10 Days (real time)
+            </label>
+            <div></div>
+          </div>
+
+          <div class="row">
             <div>
               <label for="autopilot">Guidance</label>
               <select id="autopilot">
@@ -380,6 +388,7 @@
           <canvas id="view" width="800" height="500"></canvas>
           <div class="stats">
             <div class="stat"><div class="k">Time</div><div id="sTime" class="v">0 s</div></div>
+            <div class="stat"><div class="k">Mission Countdown</div><div id="sRemaining" class="v">00:00</div></div>
             <div class="stat"><div class="k">Altitude</div><div id="sAlt" class="v">0 m</div></div>
             <div class="stat"><div class="k">Velocity</div><div id="sVel" class="v">0 m/s</div></div>
             <div class="stat"><div class="k">Acceleration</div><div id="sAcc" class="v">0 m/s²</div></div>
@@ -444,7 +453,7 @@
       ];
       const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
       const stat = {
-        time: document.getElementById("sTime"), alt: document.getElementById("sAlt"), vel: document.getElementById("sVel"),
+        time: document.getElementById("sTime"), remaining: document.getElementById("sRemaining"), alt: document.getElementById("sAlt"), vel: document.getElementById("sVel"),
         acc: document.getElementById("sAcc"), mass: document.getElementById("sMass"), fuel: document.getElementById("sFuel"),
         dv: document.getElementById("sDv"), state: document.getElementById("sState")
       };
@@ -459,6 +468,7 @@
       const mapModalCanvas = document.getElementById("mapModalView");
       const mapModalCtx = mapModalCanvas.getContext("2d");
       const showPathEl = document.getElementById("showPath");
+      const realtimeMissionEl = document.getElementById("realtimeMission");
 
       let sim;
       let running = false;
@@ -468,6 +478,16 @@
       function fmt(n, d = 0) { return Number(n).toLocaleString(undefined, { maximumFractionDigits: d }); }
       function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
       function lerp(a, b, t) { return a + (b - a) * clamp(t, 0, 1); }
+      function fmtDuration(sec) {
+        const s = Math.max(0, Math.floor(sec));
+        const days = Math.floor(s / 86400);
+        const hours = Math.floor((s % 86400) / 3600);
+        const mins = Math.floor((s % 3600) / 60);
+        const secs = s % 60;
+        if (days > 0) return `${days}d ${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+        if (hours > 0) return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+        return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+      }
 
       function log(msg, cls = "") {
         const line = document.createElement("div");
@@ -491,6 +511,7 @@
       }
 
       function artemisRateForRuntime() {
+        if (realtimeMissionEl.checked) return 1;
         const mins = clamp(Number(el.runtimeMinutes.value) || 5, 1, 10);
         return Math.round(ARTEMIS_TOTAL_SECONDS / (mins * 60));
       }
@@ -738,7 +759,7 @@
           boosterCount: Math.max(0, Math.floor(Number(el.boosterCount.value))), boosterDryMass: Number(el.boosterDryMass.value),
           boosterFuelMass: Number(el.boosterFuelMass.value), boosterThrust: Number(el.boosterThrust.value) * 1e6,
           boosterIsp: Number(el.boosterIsp.value), dragCd: Number(el.dragCd.value), autopilot: el.autopilot.value,
-          missionProfile: el.missionProfile.value, simRate: Math.max(1, Number(el.simRate.value))
+          missionProfile: el.missionProfile.value, simRate: Math.max(1, Number(el.simRate.value)), realtimeMission: realtimeMissionEl.checked
         };
         if (isArtemisMode(cfg)) {
           cfg.autopilot = "orbit";
@@ -796,12 +817,17 @@
           trajectory: []
         };
 
+        sim.totalMissionSimSeconds = sim.artemisScript ? ARTEMIS_TOTAL_SECONDS : 3000;
+
         sim.analysis = estimateMissionAnalysis(c, sim.requiredDv);
         sim.launchWindow = nextWindow(el.destination.value);
 
         logEl.textContent = "";
         log(`Vehicle reset. Initial mass ${fmt(sim.mass)} kg.`, "ok");
-        if (sim.artemisScript) log(`Artemis II scripted auto-flight enabled. 10-day mission compressed to ~${clamp(Number(el.runtimeMinutes.value) || 5, 1, 10)} min.`, "ok");
+        if (sim.artemisScript) {
+          if (sim.cfg.realtimeMission) log("Artemis II scripted auto-flight enabled. Mission will run in actual 10-day real time.", "ok");
+          else log(`Artemis II scripted auto-flight enabled. 10-day mission compressed to ~${clamp(Number(el.runtimeMinutes.value) || 5, 1, 10)} min.`, "ok");
+        }
         if (sim.idealDv < sim.requiredDv) log(`Warning: ideal Δv ${fmt(sim.idealDv)} m/s < required ${fmt(sim.requiredDv)} m/s`, "warn");
         else log(`Ideal Δv budget ${fmt(sim.idealDv)} m/s meets mission estimate.`, "ok");
         log(`Fuel planning: need ~${fmt(sim.analysis.requiredPropellant, 0)} kg propellant (${fmt(sim.analysis.propellantFraction * 100, 1)}% mass fraction).`, sim.analysis.requiredPropellant > (sim.coreFuel + sim.boosterFuel) ? "warn" : "ok");
@@ -937,7 +963,10 @@
 
       function updateStats() {
         const totalFuel = sim.coreFuel + sim.boosterFuel;
+        const simRemaining = Math.max(0, (sim.totalMissionSimSeconds || 0) - sim.t);
+        const realRemaining = simRemaining / Math.max(1, sim.cfg.simRate);
         stat.time.textContent = `${fmt(sim.t, 1)} s`;
+        stat.remaining.textContent = fmtDuration(realRemaining);
         stat.alt.textContent = `${fmt(sim.alt, 1)} m`;
         stat.vel.textContent = `${fmt(sim.vel, 1)} m/s`;
         stat.acc.textContent = `${fmt(sim.acc, 2)} m/s²`;
@@ -1125,9 +1154,10 @@
       el.destination.addEventListener("change", () => { refreshGoalText(); resetSim(); });
       el.missionProfile.addEventListener("change", () => { refreshGoalText(); resetSim(); });
       el.runtimeMinutes.addEventListener("change", () => { resetSim(); });
+      realtimeMissionEl.addEventListener("change", () => { resetSim(); });
 
       ids.forEach((id) => {
-        if (!["preset", "destination", "missionProfile", "runtimeMinutes"].includes(id)) {
+        if (!["preset", "destination", "missionProfile", "runtimeMinutes", "realtimeMission"].includes(id)) {
           el[id].addEventListener("change", () => {
             if (id === "simRate") return;
             resetSim();
