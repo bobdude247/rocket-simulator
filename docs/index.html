@@ -171,6 +171,7 @@
       }
 
       .map-panel {
+        display: none;
         border: 1px solid #2a4279;
         border-radius: 8px;
         overflow: hidden;
@@ -531,13 +532,36 @@
           const phase = sim.artemisScript.phases.find((p) => t >= p.t0 && t <= p.t1) || sim.artemisScript.phases[sim.artemisScript.phases.length - 1];
           const u = (phase.t1 - phase.t0) > 0 ? (t - phase.t0) / (phase.t1 - phase.t0) : 1;
 
-          if (phase.scene === "launch" || phase.scene === "earthOrbit" || phase.scene === "reentry" || phase.scene === "ocean") {
+          if (phase.scene === "launch") {
+            const a = lerp(Math.PI * 1.2, Math.PI * 0.15, u);
+            const r = earth.r + lerp(0.001, 0.055, u);
+            return {
+              earth,
+              moon,
+              ship: { x: earth.x + Math.cos(a) * r, y: earth.y + Math.sin(a) * r }
+            };
+          }
+
+          if (phase.scene === "earthOrbit") {
+            const turns = 2.3;
+            const a = (-Math.PI * 0.2) + u * turns * Math.PI * 2;
+            const r = earth.r + 0.065 + 0.008 * Math.sin(u * Math.PI * 2);
+            return {
+              earth,
+              moon,
+              ship: { x: earth.x + Math.cos(a) * r, y: earth.y + Math.sin(a) * r }
+            };
+          }
+
+          if (phase.name.includes("ICPS") || phase.name.includes("Trans-Lunar")) {
+            const startX = earth.x + 0.125;
+            const startY = earth.y - 0.03;
             return {
               earth,
               moon,
               ship: {
-                x: earth.x + 0.09 + 0.03 * Math.cos(sim.t / 1800),
-                y: earth.y - 0.02 + 0.03 * Math.sin(sim.t / 1500)
+                x: lerp(startX, 0.53, u),
+                y: lerp(startY, earth.y - 0.11, u)
               }
             };
           }
@@ -546,16 +570,22 @@
             return {
               earth,
               moon,
-              ship: { x: lerp(earth.x + 0.10, moon.x - 0.08, u), y: earth.y + 0.02 * Math.sin(u * Math.PI) }
+              ship: {
+                x: lerp(0.53, moon.x - 0.11, u),
+                y: lerp(earth.y - 0.11, moon.y - 0.02, u) - 0.06 * Math.sin(u * Math.PI)
+              }
             };
           }
 
           if (phase.scene === "moonFlyby") {
-            const a = u * Math.PI * 1.35 - Math.PI * 0.2;
+            const a = u * Math.PI * 1.45 - Math.PI * 0.1;
             return {
               earth,
               moon,
-              ship: { x: moon.x + Math.cos(a) * 0.08, y: moon.y + Math.sin(a) * 0.08 }
+              ship: {
+                x: moon.x + Math.cos(a) * 0.1,
+                y: moon.y + Math.sin(a) * 0.08
+              }
             };
           }
 
@@ -563,7 +593,20 @@
             return {
               earth,
               moon,
-              ship: { x: lerp(moon.x - 0.08, earth.x + 0.11, u), y: earth.y - 0.03 * Math.sin(u * Math.PI) }
+              ship: {
+                x: lerp(moon.x - 0.04, earth.x + 0.12, u),
+                y: earth.y + 0.11 * Math.sin(u * Math.PI * 0.95)
+              }
+            };
+          }
+
+          if (phase.scene === "reentry" || phase.scene === "ocean") {
+            const a = lerp(Math.PI * 0.08, Math.PI * 1.05, u);
+            const r = earth.r + lerp(0.06, 0.002, u);
+            return {
+              earth,
+              moon,
+              ship: { x: earth.x + Math.cos(a) * r, y: earth.y + Math.sin(a) * r }
             };
           }
         }
@@ -641,16 +684,38 @@
           targetCtx.stroke();
         }
 
-        targetCtx.fillStyle = "#ffdf88";
+        let heading = 0;
+        if (sim.trajectory.length > 1) {
+          const p0 = sim.trajectory[sim.trajectory.length - 2];
+          const p1 = sim.trajectory[sim.trajectory.length - 1];
+          heading = Math.atan2((p1.y - p0.y) * h, (p1.x - p0.x) * w);
+        }
+
+        targetCtx.save();
+        targetCtx.translate(sx, sy);
+        targetCtx.rotate(heading);
+        targetCtx.fillStyle = "#ffffff";
         targetCtx.beginPath();
-        targetCtx.arc(sx, sy, 5, 0, Math.PI * 2);
+        targetCtx.moveTo(8, 0);
+        targetCtx.lineTo(-6, -4);
+        targetCtx.lineTo(-3, 0);
+        targetCtx.lineTo(-6, 4);
+        targetCtx.closePath();
         targetCtx.fill();
+        targetCtx.strokeStyle = "#6fe8ff";
+        targetCtx.lineWidth = 1.4;
+        targetCtx.beginPath();
+        targetCtx.moveTo(-2, -5);
+        targetCtx.lineTo(-4, 0);
+        targetCtx.lineTo(-2, 5);
+        targetCtx.stroke();
+        targetCtx.restore();
 
         targetCtx.fillStyle = "#9ec0ff";
         targetCtx.font = "12px monospace";
         targetCtx.fillText("EARTH", ex - 26, ey + er + 16);
         targetCtx.fillText("MOON", mx - 16, my + mr + 16);
-        targetCtx.fillText(`SHIP ${(sim.scene || "launch").toUpperCase()}`, 12, 18);
+        targetCtx.fillText(`ORION ${(sim.scene || "launch").toUpperCase()}`, 12, 18);
       }
 
       function estimateMissionAnalysis(c, requiredDv) {
@@ -990,7 +1055,7 @@
         ctx.fillText(`ALT ${fmt(sim.alt, 1)} m`, 14, 22);
         ctx.fillText(`VEL ${fmt(sim.vel, 1)} m/s`, 14, 40);
         ctx.fillText(`SCENE ${(sim.scene || "launch").toUpperCase()}`, 14, 58);
-        drawMap(mapCanvas, mapCtx);
+        // keep only pop-out map visible by request
         if (mapModal.classList.contains("open")) drawMap(mapModalCanvas, mapModalCtx);
       }
 
@@ -1043,6 +1108,13 @@
       document.getElementById("mapModalClose").addEventListener("click", () => {
         mapModal.classList.remove("open");
         mapModal.setAttribute("aria-hidden", "true");
+      });
+
+      mapModal.addEventListener("click", (e) => {
+        if (e.target === mapModal) {
+          mapModal.classList.remove("open");
+          mapModal.setAttribute("aria-hidden", "true");
+        }
       });
 
       showPathEl.addEventListener("change", () => {
