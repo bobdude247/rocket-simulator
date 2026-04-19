@@ -5,47 +5,730 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Rocket Simulator</title>
     <style>
+      :root {
+        color-scheme: dark;
+        --bg: #070d1f;
+        --panel: #0f1a35;
+        --panel-2: #142347;
+        --text: #e8eefc;
+        --muted: #a9bbeb;
+        --accent: #5ee1ff;
+        --good: #70f0aa;
+        --warn: #ffd66b;
+        --bad: #ff8b8b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
-        font-family: Arial, Helvetica, sans-serif;
-        margin: 2rem auto;
-        max-width: 900px;
-        line-height: 1.5;
-        padding: 0 1rem;
+        margin: 0;
+        font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+        background: radial-gradient(circle at top, #132655 0%, var(--bg) 58%);
+        color: var(--text);
       }
-      code {
-        background: #f3f4f6;
-        padding: 0.15rem 0.35rem;
-        border-radius: 4px;
+
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 1.25rem;
       }
-      pre {
-        background: #0f172a;
-        color: #e2e8f0;
-        padding: 1rem;
+
+      h1 {
+        margin: 0 0 0.4rem;
+      }
+
+      .sub {
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        gap: 1rem;
+      }
+
+      .panel {
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border: 1px solid #28407c;
+        border-radius: 12px;
+        padding: 0.9rem;
+      }
+
+      .controls {
+        display: grid;
+        gap: 0.65rem;
+        align-content: start;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+      }
+
+      label {
+        font-size: 0.82rem;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 0.22rem;
+      }
+
+      input,
+      select,
+      button {
+        width: 100%;
         border-radius: 8px;
-        overflow-x: auto;
+        border: 1px solid #365296;
+        background: #0c1733;
+        color: var(--text);
+        padding: 0.45rem 0.55rem;
+      }
+
+      button {
+        cursor: pointer;
+        font-weight: 600;
+        background: #12306a;
+      }
+
+      button:hover {
+        background: #19408e;
+      }
+
+      .sim {
+        display: grid;
+        gap: 0.8rem;
+      }
+
+      #view {
+        width: 100%;
+        height: 500px;
+        background: linear-gradient(180deg, #08132f 0%, #0a1738 40%, #111a31 100%);
+        border: 1px solid #2f4a8d;
+        border-radius: 12px;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(120px, 1fr));
+        gap: 0.5rem;
+      }
+
+      .stat {
+        background: #0b1530;
+        border: 1px solid #2a4279;
+        border-radius: 8px;
+        padding: 0.5rem;
+      }
+
+      .k {
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+
+      .v {
+        font-weight: 700;
+        font-size: 1rem;
+        margin-top: 0.2rem;
+      }
+
+      #eventLog {
+        height: 120px;
+        overflow: auto;
+        padding: 0.5rem;
+        border: 1px solid #2a4279;
+        border-radius: 8px;
+        background: #091127;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.76rem;
+      }
+
+      .ok { color: var(--good); }
+      .warn { color: var(--warn); }
+      .bad { color: var(--bad); }
+
+      @media (max-width: 980px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
-    <h1>Rocket Simulator</h1>
-    <p>
-      Mission simulator with two modes: an SLS-inspired heavy vehicle and a hobby rocket profile.
-    </p>
+    <div class="wrap">
+      <h1>Rocket Simulator (Interactive)</h1>
+      <p class="sub">
+        Visual launch simulator with adjustable mass, fuel, thrust, booster sizing, and mission target.
+        Physics model includes variable gravity, drag, and propellant mass flow.
+      </p>
 
-    <h2>Run Locally</h2>
-    <pre><code>python -m src.rocket_simulator.cli --vehicle sls --destination mars --time-compression 86400 --max-events 20</code></pre>
+      <div class="grid">
+        <div class="panel controls">
+          <div class="row">
+            <div>
+              <label for="preset">Preset</label>
+              <select id="preset">
+                <option value="sls">SLS-style heavy</option>
+                <option value="hobby">Hobby rocket</option>
+              </select>
+            </div>
+            <div>
+              <label for="destination">Destination</label>
+              <select id="destination">
+                <option value="earth">Earth LEO</option>
+                <option value="moon">Moon</option>
+                <option value="mars">Mars</option>
+                <option value="venus">Venus</option>
+                <option value="jupiter">Jupiter flyby</option>
+              </select>
+            </div>
+          </div>
 
-    <h2>Modes</h2>
-    <ul>
-      <li><strong>sls</strong>: heavy launch + capsule + long missions</li>
-      <li><strong>hobby</strong>: small suborbital rocket with parachute recovery</li>
-    </ul>
+          <div class="row">
+            <div>
+              <label for="payloadMass">Payload/Capsule Mass (kg)</label>
+              <input id="payloadMass" type="number" min="10" step="100" />
+            </div>
+            <div>
+              <label for="diameter">Vehicle Diameter (m)</label>
+              <input id="diameter" type="number" min="0.05" step="0.1" />
+            </div>
+          </div>
 
-    <h2>Destinations</h2>
-    <p>earth, moon, mercury, venus, mars, jupiter, saturn, uranus, neptune</p>
+          <div class="row">
+            <div>
+              <label for="coreDryMass">Core Dry Mass (kg)</label>
+              <input id="coreDryMass" type="number" min="10" step="100" />
+            </div>
+            <div>
+              <label for="coreFuelMass">Core Fuel Mass (kg)</label>
+              <input id="coreFuelMass" type="number" min="0" step="100" />
+            </div>
+          </div>
 
-    <p>
-      Source code: <a href="https://github.com/bobdude247/rocket-simulator">github.com/bobdude247/rocket-simulator</a>
-    </p>
+          <div class="row">
+            <div>
+              <label for="coreThrust">Core Thrust (MN)</label>
+              <input id="coreThrust" type="number" min="0" step="0.1" />
+            </div>
+            <div>
+              <label for="coreIsp">Core Isp (s)</label>
+              <input id="coreIsp" type="number" min="1" step="1" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label for="boosterCount">Booster Count</label>
+              <input id="boosterCount" type="number" min="0" max="8" step="1" />
+            </div>
+            <div>
+              <label for="boosterDryMass">Booster Dry Mass Each (kg)</label>
+              <input id="boosterDryMass" type="number" min="0" step="100" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label for="boosterFuelMass">Booster Fuel Each (kg)</label>
+              <input id="boosterFuelMass" type="number" min="0" step="100" />
+            </div>
+            <div>
+              <label for="boosterThrust">Booster Thrust Each (MN)</label>
+              <input id="boosterThrust" type="number" min="0" step="0.1" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label for="boosterIsp">Booster Isp (s)</label>
+              <input id="boosterIsp" type="number" min="1" step="1" />
+            </div>
+            <div>
+              <label for="dragCd">Drag Coefficient Cd</label>
+              <input id="dragCd" type="number" min="0" step="0.05" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label for="simRate">Time Compression (x)</label>
+              <input id="simRate" type="number" min="1" step="1" value="30" />
+            </div>
+            <div>
+              <label for="autopilot">Guidance</label>
+              <select id="autopilot">
+                <option value="orbit">Auto-orbit ascent</option>
+                <option value="suborbital">Suborbital/recovery</option>
+                <option value="manual">Manual full thrust</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <button id="startBtn">Start / Resume</button>
+            <button id="pauseBtn">Pause</button>
+          </div>
+          <button id="resetBtn">Reset Vehicle</button>
+          <div id="goalText" class="k"></div>
+        </div>
+
+        <div class="panel sim">
+          <canvas id="view" width="800" height="500"></canvas>
+          <div class="stats">
+            <div class="stat"><div class="k">Time</div><div id="sTime" class="v">0 s</div></div>
+            <div class="stat"><div class="k">Altitude</div><div id="sAlt" class="v">0 m</div></div>
+            <div class="stat"><div class="k">Velocity</div><div id="sVel" class="v">0 m/s</div></div>
+            <div class="stat"><div class="k">Acceleration</div><div id="sAcc" class="v">0 m/s²</div></div>
+            <div class="stat"><div class="k">Total Mass</div><div id="sMass" class="v">0 kg</div></div>
+            <div class="stat"><div class="k">Fuel Left</div><div id="sFuel" class="v">0 kg</div></div>
+            <div class="stat"><div class="k">Delta‑v (ideal)</div><div id="sDv" class="v">0 m/s</div></div>
+            <div class="stat"><div class="k">Status</div><div id="sState" class="v">Idle</div></div>
+          </div>
+          <div id="eventLog"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const DESTINATIONS = {
+        earth: { name: "Earth LEO", requiredDv: 9400, orbitAlt: 180000 },
+        moon: { name: "Moon", requiredDv: 12800, orbitAlt: 200000 },
+        mars: { name: "Mars", requiredDv: 15500, orbitAlt: 220000 },
+        venus: { name: "Venus", requiredDv: 14800, orbitAlt: 220000 },
+        jupiter: { name: "Jupiter flyby", requiredDv: 18500, orbitAlt: 250000 }
+      };
+
+      const PRESETS = {
+        sls: {
+          payloadMass: 26000,
+          diameter: 8.4,
+          coreDryMass: 95000,
+          coreFuelMass: 1020000,
+          coreThrust: 8.2,
+          coreIsp: 440,
+          boosterCount: 2,
+          boosterDryMass: 90000,
+          boosterFuelMass: 620000,
+          boosterThrust: 16.0,
+          boosterIsp: 269,
+          dragCd: 0.28,
+          simRate: 60,
+          autopilot: "orbit"
+        },
+        hobby: {
+          payloadMass: 8,
+          diameter: 0.12,
+          coreDryMass: 14,
+          coreFuelMass: 18,
+          coreThrust: 0.0018,
+          coreIsp: 210,
+          boosterCount: 0,
+          boosterDryMass: 0,
+          boosterFuelMass: 0,
+          boosterThrust: 0,
+          boosterIsp: 1,
+          dragCd: 0.5,
+          simRate: 15,
+          autopilot: "suborbital"
+        }
+      };
+
+      const g0 = 9.80665;
+      const earthRadius = 6371000;
+      const rho0 = 1.225;
+      const scaleHeight = 8500;
+
+      const ids = [
+        "preset", "destination", "payloadMass", "diameter", "coreDryMass", "coreFuelMass", "coreThrust", "coreIsp",
+        "boosterCount", "boosterDryMass", "boosterFuelMass", "boosterThrust", "boosterIsp", "dragCd", "simRate", "autopilot"
+      ];
+      const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+      const stat = {
+        time: document.getElementById("sTime"),
+        alt: document.getElementById("sAlt"),
+        vel: document.getElementById("sVel"),
+        acc: document.getElementById("sAcc"),
+        mass: document.getElementById("sMass"),
+        fuel: document.getElementById("sFuel"),
+        dv: document.getElementById("sDv"),
+        state: document.getElementById("sState")
+      };
+      const logEl = document.getElementById("eventLog");
+      const goalEl = document.getElementById("goalText");
+      const canvas = document.getElementById("view");
+      const ctx = canvas.getContext("2d");
+
+      let sim;
+      let running = false;
+      let raf = null;
+      let lastTs = null;
+
+      function fmt(n, d = 0) {
+        return Number(n).toLocaleString(undefined, { maximumFractionDigits: d });
+      }
+
+      function log(msg, cls = "") {
+        const line = document.createElement("div");
+        if (cls) line.className = cls;
+        line.textContent = `[t=${fmt(sim.t, 1)}s] ${msg}`;
+        logEl.appendChild(line);
+        while (logEl.childNodes.length > 80) logEl.removeChild(logEl.firstChild);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function applyPreset(name) {
+        const p = PRESETS[name];
+        if (!p) return;
+        Object.keys(p).forEach((k) => {
+          if (el[k]) el[k].value = p[k];
+        });
+        refreshGoalText();
+      }
+
+      function refreshGoalText() {
+        const d = DESTINATIONS[el.destination.value];
+        goalEl.textContent = `Mission target: ${d.name} | Approx required mission Δv: ${fmt(d.requiredDv)} m/s`;
+      }
+
+      function readConfig() {
+        const cfg = {
+          destination: DESTINATIONS[el.destination.value],
+          payloadMass: Number(el.payloadMass.value),
+          diameter: Number(el.diameter.value),
+          coreDryMass: Number(el.coreDryMass.value),
+          coreFuelMass: Number(el.coreFuelMass.value),
+          coreThrust: Number(el.coreThrust.value) * 1e6,
+          coreIsp: Number(el.coreIsp.value),
+          boosterCount: Math.max(0, Math.floor(Number(el.boosterCount.value))),
+          boosterDryMass: Number(el.boosterDryMass.value),
+          boosterFuelMass: Number(el.boosterFuelMass.value),
+          boosterThrust: Number(el.boosterThrust.value) * 1e6,
+          boosterIsp: Number(el.boosterIsp.value),
+          dragCd: Number(el.dragCd.value),
+          autopilot: el.autopilot.value,
+          simRate: Math.max(1, Number(el.simRate.value))
+        };
+        return cfg;
+      }
+
+      function totalInitialMass(c) {
+        return c.payloadMass + c.coreDryMass + c.coreFuelMass + c.boosterCount * (c.boosterDryMass + c.boosterFuelMass);
+      }
+
+      function idealDv(c) {
+        const m0 = totalInitialMass(c);
+        const mAfterBoosters = m0 - c.boosterCount * c.boosterFuelMass - c.boosterCount * c.boosterDryMass;
+        const mFinal = c.payloadMass + c.coreDryMass;
+        let dv = 0;
+        if (c.boosterCount > 0 && c.boosterFuelMass > 0 && mAfterBoosters > 0) {
+          dv += c.boosterIsp * g0 * Math.log(m0 / (m0 - c.boosterCount * c.boosterFuelMass));
+        }
+        if (c.coreFuelMass > 0 && mFinal > 0) {
+          dv += c.coreIsp * g0 * Math.log(Math.max(mAfterBoosters, m0 - c.coreFuelMass) / mFinal);
+        }
+        return Math.max(0, dv);
+      }
+
+      function resetSim() {
+        const c = readConfig();
+        sim = {
+          cfg: c,
+          t: 0,
+          dt: 0.05,
+          alt: 0,
+          vel: 0,
+          acc: 0,
+          downrange: 0,
+          coreFuel: c.coreFuelMass,
+          boosterFuel: c.boosterCount * c.boosterFuelMass,
+          boostersAttached: c.boosterCount > 0,
+          pitchDeg: 90,
+          stageEventDone: false,
+          missionDone: false,
+          status: "Ready",
+          explosion: false,
+          landed: false,
+          idealDv: idealDv(c),
+          dryMass: c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass,
+          mass: totalInitialMass(c)
+        };
+
+        logEl.textContent = "";
+        log(`Vehicle reset. Initial mass ${fmt(sim.mass)} kg.`, "ok");
+        if (sim.idealDv < sim.cfg.destination.requiredDv) {
+          log(`Warning: ideal Δv ${fmt(sim.idealDv)} m/s < required ${fmt(sim.cfg.destination.requiredDv)} m/s`, "warn");
+        } else {
+          log(`Ideal Δv budget ${fmt(sim.idealDv)} m/s meets mission estimate.`, "ok");
+        }
+        updateStats();
+        draw();
+      }
+
+      function gravityAt(alt) {
+        return g0 * (earthRadius / (earthRadius + Math.max(0, alt))) ** 2;
+      }
+
+      function airDensity(alt) {
+        return rho0 * Math.exp(-Math.max(0, alt) / scaleHeight);
+      }
+
+      function stepPhysics(dt) {
+        const c = sim.cfg;
+
+        const grav = gravityAt(sim.alt);
+        const rho = airDensity(sim.alt);
+        const area = Math.PI * (c.diameter / 2) ** 2;
+        const dragMag = 0.5 * rho * sim.vel * sim.vel * c.dragCd * area;
+        const drag = sim.vel >= 0 ? -dragMag : dragMag;
+
+        let thrust = 0;
+        let mdot = 0;
+
+        const pitchBefore = sim.pitchDeg;
+        if (c.autopilot === "orbit") {
+          if (sim.alt > 12000) sim.pitchDeg = Math.max(20, 90 - (sim.alt - 12000) / 3000);
+          if (sim.alt > 70000) sim.pitchDeg = Math.max(5, 20 - (sim.alt - 70000) / 7000);
+        } else {
+          sim.pitchDeg = 90;
+        }
+        if (Math.abs(sim.pitchDeg - pitchBefore) > 1) {
+          // no-op, keeps deterministic updates while letting visualization track guidance
+        }
+
+        const thrustAllowed = !sim.missionDone && !sim.explosion;
+
+        if (thrustAllowed && sim.boostersAttached && sim.boosterFuel > 0 && c.boosterCount > 0) {
+          const boosterThrust = c.boosterCount * c.boosterThrust;
+          const boosterMdot = boosterThrust / (c.boosterIsp * g0);
+          thrust += boosterThrust;
+          mdot += boosterMdot;
+          const burn = Math.min(sim.boosterFuel, boosterMdot * dt);
+          sim.boosterFuel -= burn;
+          sim.mass -= burn;
+        }
+
+        if (thrustAllowed && sim.coreFuel > 0) {
+          const coreMdot = c.coreThrust / (c.coreIsp * g0);
+          thrust += c.coreThrust;
+          mdot += coreMdot;
+          const burn = Math.min(sim.coreFuel, coreMdot * dt);
+          sim.coreFuel -= burn;
+          sim.mass -= burn;
+        }
+
+        if (sim.boostersAttached && sim.boosterFuel <= 0 && c.boosterCount > 0) {
+          sim.boostersAttached = false;
+          const sepMass = c.boosterCount * c.boosterDryMass;
+          sim.mass -= sepMass;
+          if (!sim.stageEventDone) {
+            log(`Booster separation. Dropped ${fmt(sepMass)} kg dry mass.`, "ok");
+            sim.stageEventDone = true;
+          }
+        }
+
+        const net = thrust + drag - sim.mass * grav;
+        sim.acc = net / Math.max(1, sim.mass);
+        sim.vel += sim.acc * dt;
+        sim.alt += sim.vel * dt;
+        sim.downrange += Math.max(0, sim.vel * Math.cos((sim.pitchDeg * Math.PI) / 180)) * dt;
+        sim.t += dt;
+
+        if (sim.alt < 0) {
+          sim.alt = 0;
+          if (sim.vel < -22) {
+            sim.explosion = true;
+            sim.status = "Vehicle lost";
+            sim.missionDone = true;
+            log(`Impact at ${fmt(Math.abs(sim.vel), 1)} m/s. Vehicle destroyed.`, "bad");
+          } else {
+            sim.landed = true;
+            sim.status = "Recovered";
+            sim.missionDone = true;
+            log(`Landing/splashdown at ${fmt(Math.abs(sim.vel), 1)} m/s.`, "ok");
+          }
+          sim.vel = 0;
+        }
+
+        const vOrbit = Math.sqrt(3.986004418e14 / (earthRadius + Math.max(1, sim.alt)));
+        const targetAlt = c.destination.orbitAlt;
+        if (!sim.missionDone && c.autopilot === "orbit" && sim.alt >= targetAlt && sim.vel >= vOrbit * 0.92) {
+          sim.status = "Orbit achieved";
+          sim.missionDone = true;
+          log(`Orbit achieved near ${fmt(sim.alt)} m at ${fmt(sim.vel)} m/s.`, "ok");
+        }
+
+        if (!sim.missionDone && c.autopilot === "suborbital" && sim.alt > 1500 && sim.vel < -1 && sim.alt < 1200) {
+          sim.status = "Suborbital descent";
+        }
+
+        if (!sim.missionDone && sim.coreFuel <= 0 && sim.boosterFuel <= 0 && sim.alt > 0 && sim.vel < 0) {
+          sim.status = "Ballistic return";
+        }
+
+        if (!sim.missionDone && sim.t > 3000) {
+          sim.status = "Mission timeout";
+          sim.missionDone = true;
+          log("Mission timed out.", "warn");
+        }
+      }
+
+      function updateStats() {
+        const totalFuel = sim.coreFuel + sim.boosterFuel;
+        stat.time.textContent = `${fmt(sim.t, 1)} s`;
+        stat.alt.textContent = `${fmt(sim.alt, 1)} m`;
+        stat.vel.textContent = `${fmt(sim.vel, 1)} m/s`;
+        stat.acc.textContent = `${fmt(sim.acc, 2)} m/s²`;
+        stat.mass.textContent = `${fmt(sim.mass, 1)} kg`;
+        stat.fuel.textContent = `${fmt(totalFuel, 1)} kg`;
+        stat.dv.textContent = `${fmt(sim.idealDv, 0)} m/s`;
+        stat.state.textContent = sim.status;
+        stat.state.className = "v " + (sim.explosion ? "bad" : sim.missionDone ? "ok" : "");
+      }
+
+      function draw() {
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        // background stars
+        for (let i = 0; i < 35; i++) {
+          const sx = (i * 173) % w;
+          const sy = ((i * 97) % h) * 0.7;
+          ctx.fillStyle = i % 3 === 0 ? "#d6e0ff" : "#8ea8f0";
+          ctx.fillRect(sx, sy, 1.5, 1.5);
+        }
+
+        // ground
+        const groundY = h - 45;
+        ctx.fillStyle = "#1f3a22";
+        ctx.fillRect(0, groundY, w, h - groundY);
+        ctx.fillStyle = "#285731";
+        ctx.fillRect(0, groundY + 8, w, h - groundY);
+
+        // dynamic camera scaling
+        const altViewMax = Math.max(600, sim.alt * 1.15 + 200);
+        const pxPerM = (groundY - 25) / altViewMax;
+        const rocketBaseX = w * 0.2;
+        const y = groundY - sim.alt * pxPerM;
+
+        // launch tower
+        ctx.fillStyle = "#3d4e6d";
+        ctx.fillRect(rocketBaseX - 30, groundY - 90, 8, 90);
+
+        // rocket geometry scales with diameter
+        const bodyW = Math.max(8, sim.cfg.diameter * 2.6);
+        const bodyH = Math.max(40, 90 + Math.log10(Math.max(10, sim.mass)) * 8);
+
+        // boosters
+        if (sim.boostersAttached && sim.cfg.boosterCount > 0) {
+          const bw = Math.max(4, bodyW * 0.35);
+          const bh = bodyH * 0.9;
+          ctx.fillStyle = "#d9dee9";
+          ctx.fillRect(rocketBaseX - bodyW * 0.8, y - bh, bw, bh);
+          ctx.fillRect(rocketBaseX + bodyW * 0.45, y - bh, bw, bh);
+        }
+
+        // main body
+        ctx.fillStyle = "#e8ecf9";
+        ctx.fillRect(rocketBaseX - bodyW / 2, y - bodyH, bodyW, bodyH);
+        ctx.fillStyle = "#b8c7ef";
+        ctx.beginPath();
+        ctx.moveTo(rocketBaseX - bodyW / 2, y - bodyH);
+        ctx.lineTo(rocketBaseX, y - bodyH - bodyW * 0.8);
+        ctx.lineTo(rocketBaseX + bodyW / 2, y - bodyH);
+        ctx.closePath();
+        ctx.fill();
+
+        // plume
+        const producingThrust = (sim.coreFuel > 0) || (sim.boostersAttached && sim.boosterFuel > 0);
+        if (running && producingThrust && !sim.missionDone) {
+          const plumeH = 20 + Math.random() * 18;
+          ctx.fillStyle = "#ffb35c";
+          ctx.beginPath();
+          ctx.moveTo(rocketBaseX - bodyW * 0.25, y);
+          ctx.lineTo(rocketBaseX + bodyW * 0.25, y);
+          ctx.lineTo(rocketBaseX, y + plumeH);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // telemetry overlay
+        ctx.fillStyle = "#9ec0ff";
+        ctx.font = "13px monospace";
+        ctx.fillText(`ALT ${fmt(sim.alt, 1)} m`, 14, 22);
+        ctx.fillText(`VEL ${fmt(sim.vel, 1)} m/s`, 14, 40);
+        ctx.fillText(`PITCH ${fmt(sim.pitchDeg, 1)} deg`, 14, 58);
+      }
+
+      function frame(ts) {
+        if (!running) return;
+        if (lastTs == null) lastTs = ts;
+        const realDt = Math.min(0.05, (ts - lastTs) / 1000);
+        lastTs = ts;
+
+        const subStep = sim.dt;
+        let simAdvance = realDt * sim.cfg.simRate;
+        while (simAdvance > 0) {
+          const d = Math.min(subStep, simAdvance);
+          stepPhysics(d);
+          simAdvance -= d;
+          if (sim.missionDone) {
+            running = false;
+            break;
+          }
+        }
+
+        updateStats();
+        draw();
+        raf = requestAnimationFrame(frame);
+      }
+
+      document.getElementById("startBtn").addEventListener("click", () => {
+        if (!sim) resetSim();
+        running = true;
+        sim.status = sim.missionDone ? "Done" : "Running";
+        updateStats();
+        if (!raf) {
+          lastTs = null;
+          raf = requestAnimationFrame(frame);
+        }
+      });
+
+      document.getElementById("pauseBtn").addEventListener("click", () => {
+        running = false;
+        sim.status = sim.missionDone ? sim.status : "Paused";
+        updateStats();
+      });
+
+      document.getElementById("resetBtn").addEventListener("click", () => {
+        running = false;
+        resetSim();
+      });
+
+      el.preset.addEventListener("change", () => {
+        applyPreset(el.preset.value);
+        resetSim();
+      });
+
+      el.destination.addEventListener("change", () => {
+        refreshGoalText();
+        resetSim();
+      });
+
+      ids.forEach((id) => {
+        if (id !== "preset" && id !== "destination") {
+          el[id].addEventListener("change", () => {
+            if (id === "simRate") return;
+            resetSim();
+          });
+        }
+      });
+
+      applyPreset("sls");
+      resetSim();
+    </script>
   </body>
 </html>
