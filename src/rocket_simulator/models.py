@@ -30,6 +30,7 @@ class MissionPhase:
 
 @dataclass(frozen=True)
 class MissionPlan:
+    profile_name: str
     vehicle: Vehicle
     destination: Destination
     phases: List[MissionPhase]

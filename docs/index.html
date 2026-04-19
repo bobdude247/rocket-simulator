@@ -175,15 +175,31 @@
               </select>
             </div>
             <div>
+              <label for="missionProfile">Mission Profile</label>
+              <select id="missionProfile">
+                <option value="auto">Auto</option>
+                <option value="artemis2">Artemis II-inspired</option>
+                <option value="generic">Generic transfer</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
               <label for="destination">Destination</label>
               <select id="destination">
                 <option value="earth">Earth LEO</option>
                 <option value="moon">Moon</option>
+                <option value="mercury">Mercury</option>
                 <option value="mars">Mars</option>
                 <option value="venus">Venus</option>
                 <option value="jupiter">Jupiter flyby</option>
+                <option value="saturn">Saturn flyby</option>
+                <option value="uranus">Uranus flyby</option>
+                <option value="neptune">Neptune flyby</option>
               </select>
             </div>
+            <div></div>
           </div>
 
           <div class="row">
@@ -273,6 +289,7 @@
           </div>
           <button id="resetBtn">Reset Vehicle</button>
           <div id="goalText" class="k"></div>
+          <div id="analysisText" class="k"></div>
         </div>
 
         <div class="panel sim">
@@ -294,11 +311,15 @@
 
     <script>
       const DESTINATIONS = {
-        earth: { name: "Earth LEO", requiredDv: 9400, orbitAlt: 180000 },
-        moon: { name: "Moon", requiredDv: 12800, orbitAlt: 200000 },
-        mars: { name: "Mars", requiredDv: 15500, orbitAlt: 220000 },
-        venus: { name: "Venus", requiredDv: 14800, orbitAlt: 220000 },
-        jupiter: { name: "Jupiter flyby", requiredDv: 18500, orbitAlt: 250000 }
+        earth: { name: "Earth LEO", requiredDv: 9400, orbitAlt: 180000, cadenceDays: 30, reference: "2026-01-01" },
+        moon: { name: "Moon", requiredDv: 12800, orbitAlt: 200000, cadenceDays: 27, reference: "2026-01-10" },
+        mercury: { name: "Mercury", requiredDv: 17000, orbitAlt: 220000, cadenceDays: 116, reference: "2027-03-01" },
+        mars: { name: "Mars", requiredDv: 15500, orbitAlt: 220000, cadenceDays: 780, reference: "2026-11-20" },
+        venus: { name: "Venus", requiredDv: 14800, orbitAlt: 220000, cadenceDays: 584, reference: "2026-11-15" },
+        jupiter: { name: "Jupiter flyby", requiredDv: 18500, orbitAlt: 250000, cadenceDays: 399, reference: "2027-08-01" },
+        saturn: { name: "Saturn flyby", requiredDv: 20500, orbitAlt: 260000, cadenceDays: 378, reference: "2028-05-01" },
+        uranus: { name: "Uranus flyby", requiredDv: 22500, orbitAlt: 280000, cadenceDays: 370, reference: "2029-06-01" },
+        neptune: { name: "Neptune flyby", requiredDv: 24500, orbitAlt: 300000, cadenceDays: 367, reference: "2030-07-01" }
       };
 
       const PRESETS = {
@@ -316,7 +337,8 @@
           boosterIsp: 269,
           dragCd: 0.28,
           simRate: 60,
-          autopilot: "orbit"
+          autopilot: "orbit",
+          missionProfile: "auto"
         },
         hobby: {
           payloadMass: 8,
@@ -332,7 +354,8 @@
           boosterIsp: 1,
           dragCd: 0.5,
           simRate: 15,
-          autopilot: "suborbital"
+          autopilot: "suborbital",
+          missionProfile: "generic"
         }
       };
 
@@ -342,7 +365,7 @@
       const scaleHeight = 8500;
 
       const ids = [
-        "preset", "destination", "payloadMass", "diameter", "coreDryMass", "coreFuelMass", "coreThrust", "coreIsp",
+        "preset", "missionProfile", "destination", "payloadMass", "diameter", "coreDryMass", "coreFuelMass", "coreThrust", "coreIsp",
         "boosterCount", "boosterDryMass", "boosterFuelMass", "boosterThrust", "boosterIsp", "dragCd", "simRate", "autopilot"
       ];
       const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
@@ -358,6 +381,7 @@
       };
       const logEl = document.getElementById("eventLog");
       const goalEl = document.getElementById("goalText");
+      const analysisEl = document.getElementById("analysisText");
       const canvas = document.getElementById("view");
       const ctx = canvas.getContext("2d");
 
@@ -390,7 +414,49 @@
 
       function refreshGoalText() {
         const d = DESTINATIONS[el.destination.value];
-        goalEl.textContent = `Mission target: ${d.name} | Approx required mission Δv: ${fmt(d.requiredDv)} m/s`;
+        const profile = el.missionProfile.value === "artemis2" ? "Artemis II-inspired" : "Generic";
+        goalEl.textContent = `Mission target: ${d.name} | Profile: ${profile} | Approx required mission Δv: ${fmt(d.requiredDv)} m/s`;
+      }
+
+      function missionRequiredDv(destinationKey, missionProfile) {
+        if (missionProfile === "artemis2" && destinationKey === "moon") return 12400;
+        return DESTINATIONS[destinationKey].requiredDv;
+      }
+
+      function nextWindow(destinationKey) {
+        const d = DESTINATIONS[destinationKey];
+        const today = new Date();
+        const reference = new Date(`${d.reference}T00:00:00Z`);
+        const cadenceMs = d.cadenceDays * 86400 * 1000;
+
+        let open = reference;
+        if (today > reference) {
+          const delta = today.getTime() - reference.getTime();
+          const cycles = Math.floor(delta / cadenceMs) + 1;
+          open = new Date(reference.getTime() + cycles * cadenceMs);
+        }
+        const close = new Date(open.getTime() + 30 * 86400 * 1000);
+        return { open, close, cadence: d.cadenceDays };
+      }
+
+      function isoDate(dt) {
+        return dt.toISOString().slice(0, 10);
+      }
+
+      function estimateMissionAnalysis(c, requiredDv) {
+        const dryMass = c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass;
+        const thrustWeightedIsp = (
+          c.coreIsp * Math.max(c.coreThrust, 0) + c.boosterIsp * Math.max(c.boosterCount * c.boosterThrust, 0)
+        ) / Math.max(1, c.coreThrust + c.boosterCount * c.boosterThrust);
+        const avgIsp = Math.max(150, thrustWeightedIsp);
+        const m0 = dryMass * Math.exp(requiredDv / (avgIsp * g0));
+        const requiredPropellant = Math.max(0, m0 - dryMass);
+        return {
+          dryMass,
+          avgIsp,
+          requiredPropellant,
+          propellantFraction: requiredPropellant / Math.max(1, m0)
+        };
       }
 
       function readConfig() {
@@ -409,6 +475,7 @@
           boosterIsp: Number(el.boosterIsp.value),
           dragCd: Number(el.dragCd.value),
           autopilot: el.autopilot.value,
+          missionProfile: el.missionProfile.value,
           simRate: Math.max(1, Number(el.simRate.value))
         };
         return cfg;
@@ -452,17 +519,29 @@
           explosion: false,
           landed: false,
           idealDv: idealDv(c),
+          requiredDv: missionRequiredDv(el.destination.value, c.missionProfile),
           dryMass: c.payloadMass + c.coreDryMass + c.boosterCount * c.boosterDryMass,
           mass: totalInitialMass(c)
         };
 
+        sim.analysis = estimateMissionAnalysis(c, sim.requiredDv);
+        sim.launchWindow = nextWindow(el.destination.value);
+
         logEl.textContent = "";
         log(`Vehicle reset. Initial mass ${fmt(sim.mass)} kg.`, "ok");
-        if (sim.idealDv < sim.cfg.destination.requiredDv) {
-          log(`Warning: ideal Δv ${fmt(sim.idealDv)} m/s < required ${fmt(sim.cfg.destination.requiredDv)} m/s`, "warn");
+        if (sim.idealDv < sim.requiredDv) {
+          log(`Warning: ideal Δv ${fmt(sim.idealDv)} m/s < required ${fmt(sim.requiredDv)} m/s`, "warn");
         } else {
           log(`Ideal Δv budget ${fmt(sim.idealDv)} m/s meets mission estimate.`, "ok");
         }
+        log(
+          `Fuel planning: need ~${fmt(sim.analysis.requiredPropellant, 0)} kg propellant ` +
+          `(${fmt(sim.analysis.propellantFraction * 100, 1)}% mass fraction).`,
+          sim.analysis.requiredPropellant > (sim.coreFuel + sim.boosterFuel) ? "warn" : "ok"
+        );
+        analysisEl.textContent =
+          `Launch window (est.): ${isoDate(sim.launchWindow.open)} to ${isoDate(sim.launchWindow.close)} ` +
+          `| cadence ~${sim.launchWindow.cadence} days.`;
         updateStats();
         draw();
       }
@@ -718,8 +797,13 @@
         resetSim();
       });
 
+      el.missionProfile.addEventListener("change", () => {
+        refreshGoalText();
+        resetSim();
+      });
+
       ids.forEach((id) => {
-        if (id !== "preset" && id !== "destination") {
+        if (id !== "preset" && id !== "destination" && id !== "missionProfile") {
           el[id].addEventListener("change", () => {
             if (id === "simRate") return;
             resetSim();

@@ -3,7 +3,7 @@ from __future__ import annotations
 from .models import MissionPhase, MissionPlan
 
 
-def build_mission_plan(vehicle_key: str, destination_key: str) -> MissionPlan:
+def build_mission_plan(vehicle_key: str, destination_key: str, profile: str = "auto") -> MissionPlan:
     from .config import DESTINATIONS, VEHICLES
 
     if vehicle_key not in VEHICLES:
@@ -27,6 +27,37 @@ def build_mission_plan(vehicle_key: str, destination_key: str) -> MissionPlan:
         estimated_delta_v = 800
         margin = vehicle.total_delta_v_mps - estimated_delta_v
         return MissionPlan(
+            profile_name="hobby-suborbital",
+            vehicle=vehicle,
+            destination=destination,
+            phases=phases,
+            estimated_delta_v_mps=estimated_delta_v,
+            feasible=margin >= 0,
+            delta_v_margin_mps=margin,
+        )
+
+    if profile == "artemis2" and not (vehicle_key == "sls" and destination.name == "moon"):
+        raise ValueError("Artemis II profile is only available for SLS missions to the Moon")
+
+    use_artemis_ii = (profile == "artemis2") or (
+        profile == "auto" and vehicle_key == "sls" and destination.name == "moon"
+    )
+
+    if use_artemis_ii:
+        estimated_delta_v = 12400
+        phases = [
+            MissionPhase("Liftoff and booster ascent", 510),
+            MissionPhase("Earth parking orbit checkout", 5400),
+            MissionPhase("Trans-lunar injection burn", 1200),
+            MissionPhase("Outbound coast to Moon", 259200),
+            MissionPhase("Lunar flyby and free-return turn", 14400),
+            MissionPhase("Inbound coast to Earth", 302400),
+            MissionPhase("Reentry and Pacific splashdown", 1800),
+            MissionPhase("Recovery operations", 10800),
+        ]
+        margin = vehicle.total_delta_v_mps - estimated_delta_v
+        return MissionPlan(
+            profile_name="artemis-ii-inspired",
             vehicle=vehicle,
             destination=destination,
             phases=phases,
@@ -72,6 +103,7 @@ def build_mission_plan(vehicle_key: str, destination_key: str) -> MissionPlan:
     margin = vehicle.total_delta_v_mps - estimated_delta_v
 
     return MissionPlan(
+        profile_name="generic-heavy-mission",
         vehicle=vehicle,
         destination=destination,
         phases=phases,
